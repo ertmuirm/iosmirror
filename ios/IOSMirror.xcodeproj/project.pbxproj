@@ -1,0 +1,518 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		BB0A000000000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000001 /* AppDelegate.swift */; };
+		BB0A000000000000000002 /* MirrorBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000002 /* MirrorBridge.swift */; };
+		BB0A000000000000000003 /* MirrorBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000003 /* MirrorBridge.m */; };
+		BB0A000000000000000004 /* HLSStreamServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000004 /* HLSStreamServer.swift */; };
+		BB0A000000000000000005 /* TSPacketizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000005 /* TSPacketizer.swift */; };
+		BB0A000000000000000006 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000006 /* LaunchScreen.storyboard */; };
+		BB0A000000000000000007 /* SampleHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000007 /* SampleHandler.swift */; };
+		BB0A000000000000000008 /* BroadcastExtension.appex in CopyFiles */ = {isa = PBXBuildFile; fileRef = BB0P000000000000000002 /* BroadcastExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		BB0D000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BB0E000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BB0T000000000000000002;
+			remoteInfo = BroadcastExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		BB0B000000000000000006 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				BB0A000000000000000008 /* BroadcastExtension.appex in CopyFiles */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		BB0P000000000000000001 /* IOSMirror.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IOSMirror.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB0P000000000000000002 /* BroadcastExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BroadcastExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB0F000000000000000001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = IOSMirror/AppDelegate.swift; sourceTree = "<group>"; };
+		BB0F000000000000000002 /* MirrorBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MirrorBridge.swift; path = IOSMirror/MirrorBridge.swift; sourceTree = "<group>"; };
+		BB0F000000000000000003 /* MirrorBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MirrorBridge.m; path = IOSMirror/MirrorBridge.m; sourceTree = "<group>"; };
+		BB0F000000000000000004 /* HLSStreamServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HLSStreamServer.swift; path = IOSMirror/HLSStreamServer.swift; sourceTree = "<group>"; };
+		BB0F000000000000000005 /* TSPacketizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TSPacketizer.swift; path = IOSMirror/TSPacketizer.swift; sourceTree = "<group>"; };
+		BB0F000000000000000006 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = IOSMirror/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		BB0F000000000000000008 /* IOSMirror-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "IOSMirror-Bridging-Header.h"; path = "IOSMirror/IOSMirror-Bridging-Header.h"; sourceTree = "<group>"; };
+		BB0F000000000000000009 /* MainInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = IOSMirror/Info.plist; sourceTree = "<group>"; };
+		BB0F000000000000000007 /* SampleHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SampleHandler.swift; path = BroadcastExtension/SampleHandler.swift; sourceTree = "<group>"; };
+		BB0F000000000000000010 /* ExtInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = BroadcastExtension/Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		BB0B000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BB0B000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		BB0G000000000000000001 /* <group> */ = {
+			isa = PBXGroup;
+			children = (
+				BB0G000000000000000002 /* IOSMirror */,
+				BB0G000000000000000003 /* BroadcastExtension */,
+				BB0G000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		BB0G000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				BB0P000000000000000001 /* IOSMirror.app */,
+				BB0P000000000000000002 /* BroadcastExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BB0G000000000000000002 /* IOSMirror */ = {
+			isa = PBXGroup;
+			children = (
+				BB0F000000000000000001 /* AppDelegate.swift */,
+				BB0F000000000000000002 /* MirrorBridge.swift */,
+				BB0F000000000000000003 /* MirrorBridge.m */,
+				BB0F000000000000000004 /* HLSStreamServer.swift */,
+				BB0F000000000000000005 /* TSPacketizer.swift */,
+				BB0F000000000000000006 /* LaunchScreen.storyboard */,
+				BB0F000000000000000008 /* IOSMirror-Bridging-Header.h */,
+				BB0F000000000000000009 /* MainInfo.plist */,
+			);
+			name = IOSMirror;
+			sourceTree = "<group>";
+		};
+		BB0G000000000000000003 /* BroadcastExtension */ = {
+			isa = PBXGroup;
+			children = (
+				BB0F000000000000000007 /* SampleHandler.swift */,
+				BB0F000000000000000010 /* ExtInfo.plist */,
+			);
+			name = BroadcastExtension;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		BB0T000000000000000001 /* IOSMirror */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BB0C000000000000000001 /* Build configuration list for PBXNativeTarget "IOSMirror" */;
+			buildPhases = (
+				BB0B000000000000000001 /* Sources */,
+				BB0B000000000000000002 /* Frameworks */,
+				BB0B000000000000000003 /* Resources */,
+				BB0B000000000000000004 /* Bundle React Native code and images */,
+				BB0B000000000000000006 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BB0D000000000000000002 /* PBXTargetDependency */,
+			);
+			name = IOSMirror;
+			productName = IOSMirror;
+			productReference = BB0P000000000000000001 /* IOSMirror.app */;
+			productType = "com.apple.product-type.application";
+		};
+		BB0T000000000000000002 /* BroadcastExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BB0C000000000000000004 /* Build configuration list for PBXNativeTarget "BroadcastExtension" */;
+			buildPhases = (
+				BB0B000000000000000007 /* Sources */,
+				BB0B000000000000000009 /* Frameworks */,
+				BB0B000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BroadcastExtension;
+			productName = BroadcastExtension;
+			productReference = BB0P000000000000000002 /* BroadcastExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BB0E000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					BB0T000000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					BB0T000000000000000002 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = BB0C000000000000000007 /* Build configuration list for PBXProject "IOSMirror" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = BB0G000000000000000001;
+			productRefGroup = BB0G000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				BB0T000000000000000001 /* IOSMirror */,
+				BB0T000000000000000002 /* BroadcastExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		BB0B000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0A000000000000000006 /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BB0B000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		BB0B000000000000000004 /* Bundle React Native code and images */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/.xcode.env",
+			);
+			name = "Bundle React Native code and images";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/main.jsbundle",
+				"$(DERIVED_FILE_DIR)/main.jsbundle.map",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n\nREACT_NATIVE_PATH=\"${PROJECT_DIR}/../node_modules/react-native\"\nWITH_ENVIRONMENT=\"${REACT_NATIVE_PATH}/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"${REACT_NATIVE_PATH}/scripts/react-native-xcode.sh\"\n\n/bin/sh -c \"$WITH_ENVIRONMENT\" \"$REACT_NATIVE_XCODE\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BB0B000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0A000000000000000001 /* AppDelegate.swift in Sources */,
+				BB0A000000000000000002 /* MirrorBridge.swift in Sources */,
+				BB0A000000000000000003 /* MirrorBridge.m in Sources */,
+				BB0A000000000000000004 /* HLSStreamServer.swift in Sources */,
+				BB0A000000000000000005 /* TSPacketizer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BB0B000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0A000000000000000007 /* SampleHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BB0D000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BB0T000000000000000002 /* BroadcastExtension */;
+			targetProxy = BB0D000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		BB0C000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		BB0C000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		BB0C000000000000000002 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = NO;
+				INFOPLIST_FILE = IOSMirror/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.iosmirror";
+				PRODUCT_NAME = IOSMirror;
+				SWIFT_OBJC_BRIDGING_HEADER = "IOSMirror/IOSMirror-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		BB0C000000000000000003 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = NO;
+				INFOPLIST_FILE = IOSMirror/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.iosmirror";
+				PRODUCT_NAME = IOSMirror;
+				SWIFT_OBJC_BRIDGING_HEADER = "IOSMirror/IOSMirror-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		BB0C000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				ENABLE_BITCODE = NO;
+				INFOPLIST_FILE = BroadcastExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.iosmirror.BroadcastExtension";
+				PRODUCT_NAME = BroadcastExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		BB0C000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				ENABLE_BITCODE = NO;
+				INFOPLIST_FILE = BroadcastExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.iosmirror.BroadcastExtension";
+				PRODUCT_NAME = BroadcastExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BB0C000000000000000007 /* Build configuration list for PBXProject "IOSMirror" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0C000000000000000008 /* Debug */,
+				BB0C000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BB0C000000000000000001 /* Build configuration list for PBXNativeTarget "IOSMirror" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0C000000000000000002 /* Debug */,
+				BB0C000000000000000003 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BB0C000000000000000004 /* Build configuration list for PBXNativeTarget "BroadcastExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0C000000000000000005 /* Debug */,
+				BB0C000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = BB0E000000000000000001 /* Project object */;
+}

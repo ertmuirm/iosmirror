@@ -1,7 +1,7 @@
 import Foundation
 import Network
 import CoreMedia
-import ifaddrs
+import Darwin
 
 // MARK: - HLSStreamServer
 

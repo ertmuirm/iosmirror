@@ -3,6 +3,23 @@ import VideoToolbox
 import Network
 import CoreMedia
 
+// MARK: - C-compatible encoder output callback (must be outside the class)
+
+private func encoderOutputCallback(
+    outputCallbackRefCon: UnsafeMutableRawPointer?,
+    sourceFrameRefCon: UnsafeMutableRawPointer?,
+    status: OSStatus,
+    infoFlags: VTEncodeInfoFlags,
+    sampleBuffer: CMSampleBuffer?
+) {
+    guard let refCon = outputCallbackRefCon,
+          status == noErr,
+          let sampleBuffer
+    else { return }
+    let handler = Unmanaged<SampleHandler>.fromOpaque(refCon).takeUnretainedValue()
+    handler.handleEncodedSample(sampleBuffer, flags: infoFlags)
+}
+
 // MARK: - SampleHandler
 
 /// ReplayKit Broadcast Upload Extension entry point.
@@ -17,7 +34,6 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     private var connection:         NWConnection?
     private var compressionSession: VTCompressionSession?
-    private var frameCount:         Int64 = 0
 
     private let queue = DispatchQueue(label: "com.iosmirror.extension", qos: .userInteractive)
 
@@ -76,12 +92,13 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - VideoToolbox Encoder
 
     private func setupEncoder() {
-        // Use native screen resolution; ReplayKit delivers at device scale
         let screenBounds = UIScreen.main.nativeBounds
         let width  = Int32(screenBounds.width)
         let height = Int32(screenBounds.height)
 
         var session: VTCompressionSession?
+        let refCon = Unmanaged.passUnretained(self).toOpaque()
+
         let status = VTCompressionSessionCreate(
             allocator:                nil,
             width:                    width,
@@ -91,24 +108,24 @@ final class SampleHandler: RPBroadcastSampleHandler {
             imageBufferAttributes:    nil,
             compressedDataAllocator:  nil,
             outputCallback:           encoderOutputCallback,
-            refcon:                   Unmanaged.passUnretained(self).toOpaque(),
+            refcon:                   refCon,
             compressionSessionOut:    &session
         )
 
         guard status == noErr, let session else {
             finishBroadcastWithError(
                 NSError(domain: "IOSMirror", code: Int(status),
-                        userInfo: [NSLocalizedDescriptionKey: "Failed to create encoder"])
+                        userInfo: [NSLocalizedDescriptionKey: "Failed to create VTCompressionSession: \(status)"])
             )
             return
         }
 
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime,                    value: kCFBooleanTrue)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering,         value: kCFBooleanFalse)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,                 value: kVTProfileLevel_H264_High_AutoLevel)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate,               value: NSNumber(value: 4_000_000))
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,  value: NSNumber(value: 2))
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate,            value: NSNumber(value: 30))
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime,                   value: kCFBooleanTrue)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering,        value: kCFBooleanFalse)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,                value: kVTProfileLevel_H264_High_AutoLevel)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate,              value: NSNumber(value: 4_000_000))
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: NSNumber(value: 2))
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate,           value: NSNumber(value: 30))
         VTCompressionSessionPrepareToEncodeFrames(session)
 
         compressionSession = session
@@ -116,48 +133,36 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     private func encodeFrame(_ pixelBuffer: CVPixelBuffer, pts: CMTime) {
         guard let session = compressionSession else { return }
-        frameCount += 1
         VTCompressionSessionEncodeFrame(
             session,
-            imageBuffer:              pixelBuffer,
-            presentationTimeStamp:    pts,
-            duration:                 .invalid,
-            frameProperties:          nil,
-            sourceFrameRefcon:        nil,
-            infoFlagsOut:             nil
+            imageBuffer:           pixelBuffer,
+            presentationTimeStamp: pts,
+            duration:              .invalid,
+            frameProperties:       nil,
+            sourceFrameRefcon:     nil,
+            infoFlagsOut:          nil
         )
     }
 
-    // MARK: - Encoder Output Callback (C function)
+    // MARK: - Encoded Frame Handler (called from C callback above)
 
-    private let encoderOutputCallback: VTCompressionOutputCallback = { refcon, _, status, flags, sampleBuffer in
-        guard status == noErr,
-              let sampleBuffer,
-              let refcon
-        else { return }
-
-        let handler = Unmanaged<SampleHandler>.fromOpaque(refcon).takeUnretainedValue()
-        handler.handleEncodedSample(sampleBuffer, flags: flags)
-    }
-
-    private func handleEncodedSample(_ sampleBuffer: CMSampleBuffer, flags: VTEncodeInfoFlags) {
+    func handleEncodedSample(_ sampleBuffer: CMSampleBuffer, flags: VTEncodeInfoFlags) {
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
 
-        // Detect keyframe
+        // Detect keyframe: absence of NotSync attachment means it IS a sync (key) frame
         let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
             as? [[CFString: Any]]
         let isKeyframe = attachments?.first?[kCMSampleAttachmentKey_NotSync] == nil
 
         var annexB = Data()
 
-        // Prepend SPS + PPS for keyframes
+        // Prepend SPS + PPS for keyframes so the receiver can decode
         if isKeyframe, let desc = CMSampleBufferGetFormatDescription(sampleBuffer) {
             annexB.append(extractParameterSets(from: desc))
         }
 
-        // Convert AVCC length-prefixed NALUs → Annex-B start-code NALUs
-        var totalLength = 0
-        CMBlockBufferGetDataLength(dataBuffer, &totalLength)   // ← corrected call
+        // CMBlockBuffer contains AVCC-format (length-prefixed) NALUs — convert to Annex-B
+        let totalLength = CMBlockBufferGetDataLength(dataBuffer)
         var avccData = Data(count: totalLength)
         avccData.withUnsafeMutableBytes {
             CMBlockBufferCopyDataBytes(dataBuffer, atOffset: 0, dataLength: totalLength,
@@ -165,33 +170,32 @@ final class SampleHandler: RPBroadcastSampleHandler {
         }
         annexB.append(avccToAnnexB(avccData))
 
-        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        let ptsMs = Int64(CMTimeGetSeconds(pts) * 1_000)
+        let pts    = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let ptsMs  = Int64(CMTimeGetSeconds(pts) * 1_000)
         sendFrame(type: 0x01, ptsMs: ptsMs, payload: annexB)
     }
 
-    // MARK: - Format Description → SPS/PPS
+    // MARK: - Format Description → SPS/PPS (Annex-B)
 
     private func extractParameterSets(from desc: CMFormatDescription) -> Data {
-        var result = Data()
-        var count = 0
+        var result   = Data()
+        var setCount = 0
         CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
             desc, parameterSetIndex: 0,
             parameterSetPointerOut: nil, parameterSetSizeOut: nil,
-            parameterSetCountOut: &count, nalUnitHeaderLengthOut: nil
+            parameterSetCountOut: &setCount, nalUnitHeaderLengthOut: nil
         )
-        for i in 0..<count {
+        for i in 0..<setCount {
             var ptr:  UnsafePointer<UInt8>?
             var size: Int = 0
-            let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            let st = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
                 desc, parameterSetIndex: i,
                 parameterSetPointerOut: &ptr, parameterSetSizeOut: &size,
                 parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
             )
-            if status == noErr, let ptr {
-                result.append(contentsOf: [0, 0, 0, 1])
-                result.append(UnsafeBufferPointer(start: ptr, count: size))
-            }
+            guard st == noErr, let ptr else { continue }
+            result.append(contentsOf: [0, 0, 0, 1])
+            result.append(UnsafeBufferPointer(start: ptr, count: size))
         }
         return result
     }
@@ -218,9 +222,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Wire Protocol
 
     // Header layout (13 bytes):
-    //   [0]    type   : UInt8   — 0x01 = video, 0xFF = control
-    //   [1..8] pts_ms : Int64   — little-endian
-    //   [9..12] length: UInt32  — little-endian
+    //   [0]     type   : UInt8  — 0x01 = video frame, 0xFF = control
+    //   [1..8]  pts_ms : Int64  — little-endian milliseconds
+    //   [9..12] length : UInt32 — little-endian payload byte count
 
     private func sendFrame(type: UInt8, ptsMs: Int64, payload: Data) {
         guard let conn = connection else { return }
@@ -228,7 +232,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         header[0] = type
         var pts = ptsMs
         var len = UInt32(payload.count)
-        withUnsafeBytes(of: &pts) { header.replaceSubrange(1..<9, with: $0) }
+        withUnsafeBytes(of: &pts) { header.replaceSubrange(1..<9,  with: $0) }
         withUnsafeBytes(of: &len) { header.replaceSubrange(9..<13, with: $0) }
         conn.send(content: header + payload, completion: .idempotent)
     }
