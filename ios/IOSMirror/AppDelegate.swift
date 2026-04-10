@@ -1,6 +1,5 @@
 import UIKit
 import GoogleCast
-import React
 import React_RCTAppDelegate
 
 @main
@@ -38,7 +37,6 @@ final class AppDelegate: RCTAppDelegate {
         let criteria = GCKDiscoveryCriteria(applicationID: kGCKDefaultMediaReceiverApplicationID)
         let options  = GCKCastOptions(discoveryCriteria: criteria)
         options.physicalVolumeButtonsWillControlDeviceVolume = true
-        options.suspendSessionsWhenBackgrounded = false
         GCKCastContext.setSharedInstanceWith(options)
         GCKLogger.sharedInstance().delegate = self
     }

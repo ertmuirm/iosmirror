@@ -1,5 +1,4 @@
 import Foundation
-import React
 import GoogleCast
 import ReplayKit
 import UIKit
