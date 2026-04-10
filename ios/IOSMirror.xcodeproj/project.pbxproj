@@ -12,7 +12,6 @@
 		BB0A000000000000000003 /* MirrorBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000003 /* MirrorBridge.m */; };
 		BB0A000000000000000004 /* HLSStreamServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000004 /* HLSStreamServer.swift */; };
 		BB0A000000000000000005 /* TSPacketizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000005 /* TSPacketizer.swift */; };
-		BB0A000000000000000006 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000006 /* LaunchScreen.storyboard */; };
 		BB0A000000000000000007 /* SampleHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000007 /* SampleHandler.swift */; };
 		BB0A000000000000000008 /* BroadcastExtension.appex in CopyFiles */ = {isa = PBXBuildFile; fileRef = BB0P000000000000000002 /* BroadcastExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -49,7 +48,6 @@
 		BB0F000000000000000003 /* MirrorBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MirrorBridge.m; path = IOSMirror/MirrorBridge.m; sourceTree = "<group>"; };
 		BB0F000000000000000004 /* HLSStreamServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HLSStreamServer.swift; path = IOSMirror/HLSStreamServer.swift; sourceTree = "<group>"; };
 		BB0F000000000000000005 /* TSPacketizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TSPacketizer.swift; path = IOSMirror/TSPacketizer.swift; sourceTree = "<group>"; };
-		BB0F000000000000000006 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = IOSMirror/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		BB0F000000000000000008 /* IOSMirror-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "IOSMirror-Bridging-Header.h"; path = "IOSMirror/IOSMirror-Bridging-Header.h"; sourceTree = "<group>"; };
 		BB0F000000000000000009 /* MainInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = IOSMirror/Info.plist; sourceTree = "<group>"; };
 		BB0F000000000000000007 /* SampleHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SampleHandler.swift; path = BroadcastExtension/SampleHandler.swift; sourceTree = "<group>"; };
@@ -100,7 +98,6 @@
 				BB0F000000000000000003 /* MirrorBridge.m */,
 				BB0F000000000000000004 /* HLSStreamServer.swift */,
 				BB0F000000000000000005 /* TSPacketizer.swift */,
-				BB0F000000000000000006 /* LaunchScreen.storyboard */,
 				BB0F000000000000000008 /* IOSMirror-Bridging-Header.h */,
 				BB0F000000000000000009 /* MainInfo.plist */,
 			);
@@ -198,7 +195,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				BB0A000000000000000006 /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
