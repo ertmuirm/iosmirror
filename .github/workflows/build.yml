@@ -20,7 +20,7 @@ jobs:
           node-version: 24
 
       - name: Install JS dependencies
-        run: npm install --loglevel error
+        run: npm install --loglevel error --legacy-peer-deps
 
       - name: Install CocoaPods dependencies
         working-directory: ios
