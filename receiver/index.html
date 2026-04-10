@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>iOS Mirror Receiver</title>
+
+  <!-- Cast Application Framework v3 receiver SDK -->
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #000;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* CAF renders video inside this element automatically */
+    cast-media-player {
+      width: 100vw;
+      height: 100vh;
+      --theme-hue: 20;           /* orange accent matching the iOS app */
+      --progress-color: #FF6B35;
+    }
+
+    #idle-screen {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at center, #1a1a2e 0%, #000 100%);
+      gap: 24px;
+      transition: opacity 0.5s ease;
+    }
+
+    #idle-screen.hidden { opacity: 0; pointer-events: none; }
+
+    .logo {
+      font-size: 72px;
+      line-height: 1;
+    }
+
+    .app-name {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .tagline {
+      font-size: 18px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <!-- Shown while no stream is active -->
+  <div id="idle-screen">
+    <div class="logo">📱</div>
+    <div class="app-name">iOS Mirror</div>
+    <div class="tagline">Waiting for stream…</div>
+  </div>
+
+  <!-- CAF receiver renders video here -->
+  <cast-media-player></cast-media-player>
+
+  <script>
+    const context       = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+    const idleScreen    = document.getElementById('idle-screen');
+
+    // Hide the idle screen as soon as media starts playing
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYER_STATE_CHANGED,
+      (event) => {
+        const playing = event.state === cast.framework.messages.PlayerState.PLAYING ||
+                        event.state === cast.framework.messages.PlayerState.BUFFERING;
+        idleScreen.classList.toggle('hidden', playing);
+      }
+    );
+
+    // Log errors to the console (visible in Cast debugging tools)
+    playerManager.addEventListener(
+      cast.framework.events.EventType.ERROR,
+      (event) => console.error('[IOSMirror] Player error:', JSON.stringify(event))
+    );
+
+    // Intercept load requests so we can log the incoming HLS URL
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (request) => {
+        console.log('[IOSMirror] Loading stream:', request.media?.contentId ?? request.media?.contentUrl);
+        return request;
+      }
+    );
+
+    context.start({
+      maxInactivity:          3600,   // keep receiver alive up to 1 hour idle
+      touchScreenOptimizedApp: false,
+    });
+  </script>
+</body>
+</html>

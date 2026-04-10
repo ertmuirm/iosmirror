@@ -1,0 +1,41 @@
+require_relative '../node_modules/react-native/scripts/react_native_pods'
+
+platform :ios, '16.0'
+use_frameworks! :linkage => :static
+
+# Disable BitCode (deprecated in Xcode 14+)
+post_install do |installer|
+  react_native_post_install(installer, '../node_modules/react-native', :mac_catalyst_enabled => false)
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['ENABLE_BITCODE'] = 'NO'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+      # Build unsigned — signing is handled by SideStore at install time
+      config.build_settings['CODE_SIGN_IDENTITY'] = ''
+      config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+      config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+    end
+  end
+end
+
+target 'IOSMirror' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  # Google Cast SDK
+  pod 'google-cast-sdk-no-bluetooth', '~> 4.8'
+
+  target 'IOSMirrorTests' do
+    inherit! :complete
+  end
+end
+
+# BroadcastExtension — no React Native, no Cast SDK (runs out-of-process)
+target 'BroadcastExtension' do
+  inherit! :none
+  # Extension is self-contained; VideoToolbox & Network are system frameworks.
+end
