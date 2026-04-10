@@ -41,7 +41,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         connectToHLSServer()
-        setupEncoder()
+        // Encoder is set up lazily on the first video frame so we can use
+        // the actual pixel buffer dimensions (UIScreen.main is unavailable
+        // in a Broadcast Upload Extension process).
     }
 
     override func broadcastPaused() {
@@ -68,6 +70,12 @@ final class SampleHandler: RPBroadcastSampleHandler {
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
         else { return }
 
+        // Set up encoder on first frame using actual buffer dimensions.
+        if compressionSession == nil {
+            setupEncoder(width:  Int32(CVPixelBufferGetWidth(pixelBuffer)),
+                         height: Int32(CVPixelBufferGetHeight(pixelBuffer)))
+        }
+
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         encodeFrame(pixelBuffer, pts: pts)
     }
@@ -91,11 +99,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - VideoToolbox Encoder
 
-    private func setupEncoder() {
-        let screenBounds = UIScreen.main.nativeBounds
-        let width  = Int32(screenBounds.width)
-        let height = Int32(screenBounds.height)
-
+    private func setupEncoder(width: Int32, height: Int32) {
         var session: VTCompressionSession?
         let refCon = Unmanaged.passUnretained(self).toOpaque()
 

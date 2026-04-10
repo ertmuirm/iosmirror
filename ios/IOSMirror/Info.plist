@@ -30,7 +30,7 @@
     <dict/>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
-        <string>armv7</string>
+        <string>arm64</string>
     </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
@@ -41,10 +41,5 @@
         <key>UIApplicationSupportsMultipleScenes</key>
         <false/>
     </dict>
-    <!-- App Group shared with BroadcastExtension -->
-    <key>com.apple.security.application-groups</key>
-    <array>
-        <string>group.com.iosmirror.shared</string>
-    </array>
 </dict>
 </plist>
