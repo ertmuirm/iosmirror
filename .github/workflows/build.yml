@@ -26,7 +26,7 @@ jobs:
 
       - name: Build (unsigned)
         run: |
-          xcodebuild archive -scheme IOSMirror -configuration Release -archivePath ./build/IOSMirror.xarchive CODE_SIGNING_ALLOWED=NO \
+          xcodebuild archive -scheme IOSMirror -sdk iphonesimulator -configuration Release -archivePath ./build/IOSMirror.xarchive CODE_SIGNING_ALLOWED=NO \
 
       - name: Package as IPA
         run: |
