@@ -6,11 +6,11 @@ Mirror your iPhone screen to any Chromecast-enabled device on the same Wi-Fi net
 
 # How it works
 Component	Role
-HomeScreen (React Native)	Discover devices, start/stop mirroring
-MirrorBridge (Swift native module)	Connects RN to Cast SDK + HLS server
-BroadcastExtension (iOS app extension)	Captures screen frames via ReplayKit
-HLSStreamServer (Swift)	Encodes H.264, serves live HLS stream
-Google Cast SDK	Connects to Chromecast and plays stream
+* HomeScreen (React Native)	Discover devices, start/stop mirroring
+* MirrorBridge (Swift native module)	Connects RN to Cast SDK + HLS server
+* BroadcastExtension (iOS app extension)	Captures screen frames via ReplayKit
+* HLSStreamServer (Swift)	Encodes H.264, serves live HLS stream
+* Google Cast SDK	Connects to Chromecast and plays stream
 
 # UI
 Upon first startup, user to approve required permissions
