@@ -100,7 +100,7 @@ export default function HomeScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#000000',
     paddingHorizontal: 24,
   },
   header: {
@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#888888',
+    color: '#ffffff',
     marginTop: 6,
     lineHeight: 20,
   },
@@ -126,13 +126,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   scanText: {
-    color: '#888888',
+    color: '#ffffff',
     fontSize: 13,
   },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1c1c1e',
+    backgroundColor: '#000000',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     minHeight: 56,
   },
   buttonDisabled: {
-    backgroundColor: '#2c2c2e',
+    backgroundColor: '#000000',
   },
   buttonText: {
     color: '#ffffff',
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   hint: {
-    color: '#555555',
+    color: '#ffffff',
     fontSize: 12,
     textAlign: 'center',
     lineHeight: 18,

@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptyBody: {
-    color: '#666666',
+    color: '#ffffff',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
@@ -100,7 +100,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1c1c1e',
+    backgroundColor: '#000000',
     borderRadius: 14,
     padding: 16,
     borderWidth: 1.5,
@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 10,
-    backgroundColor: '#2c2c2e',
+    backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   model: {
-    color: '#888888',
+    color: '#ffffff',
     fontSize: 12,
     marginTop: 2,
   },

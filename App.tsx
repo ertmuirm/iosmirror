@@ -5,7 +5,7 @@ import HomeScreen from './src/screens/HomeScreen';
 export default function App(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
       <HomeScreen />
     </SafeAreaView>
   );
@@ -14,6 +14,6 @@ export default function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#000000',
   },
 });
