@@ -32,6 +32,9 @@ post_install do |installer|
       config.build_settings['CODE_SIGN_IDENTITY']         = ''
       config.build_settings['CODE_SIGNING_REQUIRED']      = 'NO'
       config.build_settings['CODE_SIGNING_ALLOWED']       = 'NO'
+      # Suppress char_traits<unsigned char> deprecation introduced in
+      # Xcode 16 / iOS 18 SDK; triggered by folly and other RN C++ deps.
+      config.build_settings['OTHER_CPLUSPLUSFLAGS'] = '$(inherited) -Wno-deprecated-declarations'
     end
   end
 end
