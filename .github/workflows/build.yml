@@ -26,16 +26,7 @@ jobs:
 
       - name: Build (unsigned)
         run: |
-          xcodebuild archive \
-            -workspace ios/IOSMirror.xcworkspace \
-            -scheme IOSMirror \
-            -configuration Release \
-            -archivePath ./build/IOSMirror.xarchive
-            -sdk iphoneos \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            clean build
+          xcodebuild archive -scheme IOSMirror -configuration Release -archivePath ./build/IOSMirror.xarchive CODE_SIGNING_ALLOWED=NO \
 
       - name: Package as IPA
         run: |
@@ -44,9 +35,9 @@ jobs:
           chmod +x Payload/IOSMirror.app/IOSMirror
           zip -r IOSMirror.ipa Payload
 
-      - name: Upload IPA artifact
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: IOSMirror-${{ github.run_number }}
+          name: IOSMirror
           path: IOSMirror.ipa
           retention-days: 30
