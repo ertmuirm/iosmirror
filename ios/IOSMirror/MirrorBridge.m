@@ -1,5 +1,5 @@
-#import <React/RCTBridgeModule.h>
-#import <React/RCTEventEmitter.h>
+@import React;
+@import React.RCTBridge_Private;
 
 RCT_EXTERN_MODULE(MirrorBridge, RCTEventEmitter)
 
