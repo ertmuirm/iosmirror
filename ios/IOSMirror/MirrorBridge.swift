@@ -172,6 +172,6 @@ extension MirrorBridge: GCKDiscoveryManagerListener {
     }
 
     func discoveryManagerDidStopDiscovery(_ discoveryManager: GCKDiscoveryManager) {
-        emit("onScanComplete", body: nil)
+        emit("onScanComplete", body: NSNull())
     }
 }
