@@ -22,6 +22,15 @@ jobs:
       - name: Install JS dependencies
         run: npm install --loglevel error --legacy-peer-deps
 
+      - name: Bundle JS
+        run: |
+          npx react-native bundle \
+            --platform ios \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output ios/IOSMirror/main.jsbundle \
+            --assets-dest ios/IOSMirror
+
       - name: Install CocoaPods dependencies
         working-directory: ios
         run: pod install
