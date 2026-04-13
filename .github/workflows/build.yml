@@ -51,8 +51,13 @@ jobs:
 
       - name: Package as IPA
         run: |
+          APP=build/Build/Products/Release-iphoneos/IOSMirror.app
+          # react-native-xcode.sh may skip bundling in CI; guarantee the file is present.
+          if [ ! -f "$APP/main.jsbundle" ]; then
+            cp ios/IOSMirror/main.jsbundle "$APP/main.jsbundle"
+          fi
           mkdir Payload
-          cp -r build/Build/Products/Release-iphoneos/IOSMirror.app Payload/
+          cp -r "$APP" Payload/
           zip -r app.ipa Payload/
 
       - name: Upload IPA artifact
