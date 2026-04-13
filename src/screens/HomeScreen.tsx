@@ -54,7 +54,7 @@ export default function HomeScreen(): React.JSX.Element {
       {/* Scan indicator */}
       {scanning && (
         <View style={styles.scanRow}>
-          <ActivityIndicator size="small" color="#FF6B35" />
+          <ActivityIndicator size="small" color="#19FFA3" />
           <Text style={styles.scanText}>Scanning for devices…</Text>
         </View>
       )}
@@ -143,14 +143,14 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#FF6B35',
+    backgroundColor: '#19FFA3',
   },
   badgeText: {
     color: '#ffffff',
     fontSize: 14,
   },
   button: {
-    backgroundColor: '#FF6B35',
+    backgroundColor: '#19FFA3',
     borderRadius: 16,
     paddingVertical: 18,
     alignItems: 'center',

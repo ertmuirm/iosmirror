@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   rowSelected: {
-    borderColor: '#FF6B35',
+    borderColor: '#19FFA3',
   },
   iconWrap: {
     width: 42,
@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#FF6B35',
+    backgroundColor: '#19FFA3',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 10,
