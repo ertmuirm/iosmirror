@@ -12,6 +12,7 @@
     "react-native": "0.73.4"
   },
   "devDependencies": {
+    "@react-native/babel-preset": "^0.73.0",
     "@react-native/metro-config": "^0.73.0",
     "@types/react": "^18.2.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
