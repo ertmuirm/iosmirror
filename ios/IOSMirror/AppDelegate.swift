@@ -25,7 +25,7 @@ final class AppDelegate: RCTAppDelegate {
 #if DEBUG
         RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
 #else
-        Bundle.main.url(forResource: "main", withExtension: "jsbundle")
+        Bundle(for: AppDelegate.self).url(forResource: "main", withExtension: "jsbundle")
 #endif
     }
 
