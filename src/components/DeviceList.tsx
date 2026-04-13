@@ -38,9 +38,6 @@ export default function DeviceList({ devices, selectedDevice, onSelect }: Props)
         accessibilityRole="button"
         accessibilityState={{ selected }}
       >
-        <View style={styles.iconWrap}>
-          <Text style={styles.iconText}>📺</Text>
-        </View>
         <View style={styles.info}>
           <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
           <Text style={styles.model} numberOfLines={1}>{item.modelName}</Text>
@@ -108,18 +105,6 @@ const styles = StyleSheet.create({
   },
   rowSelected: {
     borderColor: '#19FFA3',
-  },
-  iconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: '#000000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  iconText: {
-    fontSize: 22,
   },
   info: {
     flex: 1,

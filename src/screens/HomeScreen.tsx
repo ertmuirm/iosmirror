@@ -48,7 +48,6 @@ export default function HomeScreen(): React.JSX.Element {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>iOS Mirror</Text>
-        <Text style={styles.subtitle}>Cast your screen to any Chromecast on this Wi-Fi network</Text>
       </View>
 
       {/* Scan indicator */}
@@ -88,11 +87,6 @@ export default function HomeScreen(): React.JSX.Element {
         )}
       </TouchableOpacity>
 
-      {/* iOS requirement note */}
-      <Text style={styles.hint}>
-        You will be asked to tap "Start Broadcast" in the iOS system sheet —
-        this is required by iOS and cannot be bypassed.
-      </Text>
     </View>
   );
 }
@@ -112,12 +106,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#ffffff',
     letterSpacing: 0.3,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#ffffff',
-    marginTop: 6,
-    lineHeight: 20,
   },
   scanRow: {
     flexDirection: 'row',
@@ -166,12 +154,5 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     letterSpacing: 0.2,
-  },
-  hint: {
-    color: '#ffffff',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 32,
   },
 });
