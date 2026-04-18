@@ -22,7 +22,8 @@ final class HLSStreamServer {
     // MARK: - State
 
     private(set) var streamURL: URL?
-    var onFirstSegmentReady: (() -> Void)?
+    var onExtensionConnected: (() -> Void)?
+    var onFirstSegmentReady:  (() -> Void)?
 
     private var httpListener:      NWListener?
     private var extensionListener: NWListener?
@@ -99,6 +100,10 @@ final class HLSStreamServer {
         listener.newConnectionHandler = { [weak self] conn in
             conn.start(queue: self?.queue ?? .global())
             self?.receiveLoop(conn)
+            if let cb = self?.onExtensionConnected {
+                self?.onExtensionConnected = nil
+                DispatchQueue.main.async { cb() }
+            }
         }
         listener.start(queue: queue)
     }
@@ -209,6 +214,8 @@ final class HLSStreamServer {
         segmentStartPTS = Int64.min
         receiveBuffer = Data()
         packetizer = TSPacketizer()
+        onExtensionConnected = nil
+        onFirstSegmentReady  = nil
     }
 
     // MARK: - HTTP Server (port 8080)
