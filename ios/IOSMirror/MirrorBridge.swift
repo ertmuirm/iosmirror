@@ -95,6 +95,15 @@ final class MirrorBridge: RCTEventEmitter {
         session.remoteMediaClient?.loadMedia(with: request.build())
     }
 
+    private func installedBroadcastExtensionBundleID() -> String? {
+        guard let pluginsURL = Bundle(for: AppDelegate.self).builtInPlugInsURL,
+              let urls = try? FileManager.default.contentsOfDirectory(
+                  at: pluginsURL, includingPropertiesForKeys: nil)
+        else { return nil }
+        return urls.first { $0.pathExtension == "appex" }
+            .flatMap { Bundle(url: $0)?.bundleIdentifier }
+    }
+
     /// Shows the iOS system broadcast picker so the user can tap "Start Broadcast".
     private func triggerBroadcastPicker() {
         guard let windowScene = UIApplication.shared.connectedScenes
@@ -104,7 +113,9 @@ final class MirrorBridge: RCTEventEmitter {
         else { return }
 
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-        picker.preferredExtension = "com.iosmirror.BroadcastExtension"
+        // Resolve the actual installed extension bundle ID — sideloaders inject a
+        // team ID so the hardcoded string never matches.
+        picker.preferredExtension = installedBroadcastExtensionBundleID()
         picker.showsMicrophoneButton = false
         rootVC.view.addSubview(picker)
 
@@ -126,7 +137,12 @@ extension MirrorBridge: GCKSessionManagerListener {
         _ sessionManager: GCKSessionManager,
         didStart session: GCKCastSession
     ) {
-        loadStream(on: session)
+        // Trigger the broadcast picker first; load the stream on Chromecast only
+        // after the first HLS segment is ready — otherwise the player gets an
+        // empty playlist and gives up.
+        HLSStreamServer.shared.onFirstSegmentReady = { [weak self] in
+            self?.loadStream(on: session)
+        }
         emit("onCastStateChanged", body: ["state": "mirroring"])
         DispatchQueue.main.async { self.triggerBroadcastPicker() }
     }
@@ -144,6 +160,7 @@ extension MirrorBridge: GCKSessionManagerListener {
         didFailToStart session: GCKCastSession,
         withError error: Error
     ) {
+        HLSStreamServer.shared.onFirstSegmentReady = nil
         HLSStreamServer.shared.stop()
         emit("onCastStateChanged", body: ["state": "idle"])
     }

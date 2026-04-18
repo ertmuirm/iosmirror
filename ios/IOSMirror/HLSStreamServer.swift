@@ -22,6 +22,7 @@ final class HLSStreamServer {
     // MARK: - State
 
     private(set) var streamURL: URL?
+    var onFirstSegmentReady: (() -> Void)?
 
     private var httpListener:      NWListener?
     private var extensionListener: NWListener?
@@ -184,6 +185,12 @@ final class HLSStreamServer {
         segmentIndex += 1
         segmentData = Data()
 
+        if segmentIndex == 1 {
+            let cb = onFirstSegmentReady
+            onFirstSegmentReady = nil
+            DispatchQueue.main.async { cb?() }
+        }
+
         if segments.count > maxSegments {
             let old = segments.removeFirst()
             try? FileManager.default.removeItem(at: segmentDir.appendingPathComponent(old))
@@ -280,7 +287,6 @@ final class HLSStreamServer {
         m3u8     += "#EXT-X-VERSION:3\n"
         m3u8     += "#EXT-X-TARGETDURATION:\(Int(segmentDuration) + 1)\n"
         m3u8     += "#EXT-X-MEDIA-SEQUENCE:\(mediaSequence)\n"
-        m3u8     += "#EXT-X-PLAYLIST-TYPE:EVENT\n"
         for name in segments {
             m3u8 += "#EXTINF:\(segmentDuration),\n"
             m3u8 += "http://\(localIP):\(httpPort)/stream/\(name)\n"
