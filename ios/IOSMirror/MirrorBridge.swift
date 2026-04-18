@@ -11,11 +11,7 @@ final class MirrorBridge: RCTEventEmitter {
 
     private var hasListeners = false
 
-    // Device held until "broadcastStarted" Darwin notification fires.
-    private var pendingDevice: GCKDevice?
-
-    // Tokens for Darwin notify registrations; -1 = not registered.
-    private var broadcastStartedToken: Int32 = -1
+    // Token for Darwin notify registration; -1 = not registered.
     private var broadcastStoppedToken: Int32 = -1
 
     // MARK: - RCTEventEmitter
@@ -68,7 +64,6 @@ final class MirrorBridge: RCTEventEmitter {
                 return
             }
 
-            self.pendingDevice = device
             HLSStreamServer.shared.start()
 
             // Diagnostic: fires when the extension TCP-connects to port 9090.
@@ -76,18 +71,17 @@ final class MirrorBridge: RCTEventEmitter {
                 self?.emit("onDebug", body: "tcp_connected")
             }
 
-            // "broadcastStarted" fires the moment the extension's 3-second
-            // countdown finishes — before the first TCP frame arrives.
-            // Starting Cast here means the TV only goes dark after broadcast begins.
-            var startedTok: Int32 = -1
-            notify_register_dispatch(
-                "com.iosmirror.broadcastStarted", &startedTok, .main
-            ) { [weak self] _ in
-                guard let self, let device = self.pendingDevice else { return }
-                self.pendingDevice = nil
-                GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
+            // Load the HLS stream as soon as the first segment is ready —
+            // by then the receiver has content to start playing.
+            HLSStreamServer.shared.onFirstSegmentReady = { [weak self] in
+                guard let self else { return }
+                self.emit("onDebug", body: "first_segment_ready")
+                DispatchQueue.main.async {
+                    if let session = GCKCastContext.sharedInstance().sessionManager.currentCastSession {
+                        self.loadStream(on: session)
+                    }
+                }
             }
-            self.broadcastStartedToken = startedTok
 
             // "broadcastStopped" fires when the user taps the iOS stop button —
             // end the Cast session so the TV returns to its home screen.
@@ -103,8 +97,11 @@ final class MirrorBridge: RCTEventEmitter {
             }
             self.broadcastStoppedToken = stoppedTok
 
-            // Show the picker so the user can start broadcasting.
-            self.triggerBroadcastPicker()
+            // Start the Cast session now while the app is in the foreground.
+            // The receiver shows "Waiting for stream…" until onFirstSegmentReady
+            // fires and we call loadStream(). The broadcast picker is shown in
+            // sessionManager:didStart: once the Cast connection is confirmed.
+            GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
             resolve(nil)
         }
     }
@@ -114,7 +111,6 @@ final class MirrorBridge: RCTEventEmitter {
         reject _: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
-            self.pendingDevice = nil
             self.cancelBroadcastNotifications()
             HLSStreamServer.shared.onBroadcastStopped  = nil
             HLSStreamServer.shared.onFirstSegmentReady = nil
@@ -127,10 +123,6 @@ final class MirrorBridge: RCTEventEmitter {
     // MARK: - Helpers
 
     private func cancelBroadcastNotifications() {
-        if broadcastStartedToken != -1 {
-            notify_cancel(broadcastStartedToken)
-            broadcastStartedToken = -1
-        }
         if broadcastStoppedToken != -1 {
             notify_cancel(broadcastStoppedToken)
             broadcastStoppedToken = -1
@@ -193,10 +185,10 @@ extension MirrorBridge: GCKSessionManagerListener {
         _ sessionManager: GCKSessionManager,
         didStart session: GCKCastSession
     ) {
-        // Broadcast has already been running for a few seconds by the time Cast
-        // connects, so segments should already be available. Load immediately and
-        // let the Chromecast's live HLS player handle any initial buffering.
-        loadStream(on: session)
+        // Cast is confirmed connected while the app is still active.
+        // Show the broadcast picker now — the HLS stream will be loaded
+        // via onFirstSegmentReady once the extension starts sending frames.
+        triggerBroadcastPicker()
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
@@ -218,6 +210,7 @@ extension MirrorBridge: GCKSessionManagerListener {
         HLSStreamServer.shared.onFirstSegmentReady = nil
         HLSStreamServer.shared.stop()
         emit("onCastStateChanged", body: ["state": "idle"])
+        emit("onDebug", body: "cast_failed: \(error.localizedDescription)")
     }
 }
 
