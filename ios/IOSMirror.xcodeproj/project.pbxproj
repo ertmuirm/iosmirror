@@ -13,6 +13,7 @@
 		BB0A000000000000000004 /* HLSStreamServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000004 /* HLSStreamServer.swift */; };
 		BB0A000000000000000005 /* TSPacketizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000005 /* TSPacketizer.swift */; };
 		BB0A000000000000000007 /* SampleHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000007 /* SampleHandler.swift */; };
+		BB0A00000000000000000A /* TSPacketizer.swift in Sources (ext) */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000005 /* TSPacketizer.swift */; };
 		BB0A000000000000000008 /* BroadcastExtension.appex in CopyFiles */ = {isa = PBXBuildFile; fileRef = BB0P000000000000000002 /* BroadcastExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BB0A000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB0F000000000000000011 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -253,6 +254,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BB0A000000000000000007 /* SampleHandler.swift in Sources */,
+				BB0A00000000000000000A /* TSPacketizer.swift in Sources (ext) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

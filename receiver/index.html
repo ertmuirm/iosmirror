@@ -75,33 +75,58 @@
     const playerManager = context.getPlayerManager();
     const idleScreen    = document.getElementById('idle-screen');
 
-    // Hide the idle screen as soon as media starts playing
+    // Saved so we can retry after errors.
+    let lastMedia   = null;
+    let retryTimer  = null;
+    let retryCount  = 0;
+    const MAX_RETRY = 30;   // give up after ~60 s
+
+    function scheduleRetry() {
+      if (!lastMedia || retryCount >= MAX_RETRY) return;
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        retryCount++;
+        console.log('[IOSMirror] Retrying stream (' + retryCount + ')...');
+        const req = new cast.framework.messages.LoadRequestData();
+        req.media = lastMedia;
+        playerManager.load(req).catch(e => console.warn('[IOSMirror] Retry err:', e));
+      }, 2000);
+    }
+
+    // Hide idle screen once playing; reset retry state.
     playerManager.addEventListener(
       cast.framework.events.EventType.PLAYER_STATE_CHANGED,
       (event) => {
         const playing = event.state === cast.framework.messages.PlayerState.PLAYING ||
                         event.state === cast.framework.messages.PlayerState.BUFFERING;
         idleScreen.classList.toggle('hidden', playing);
+        if (playing) { clearTimeout(retryTimer); retryCount = 0; }
       }
     );
 
-    // Log errors to the console (visible in Cast debugging tools)
+    // Retry on error — extension HTTP server may not be up yet.
     playerManager.addEventListener(
       cast.framework.events.EventType.ERROR,
-      (event) => console.error('[IOSMirror] Player error:', JSON.stringify(event))
+      (event) => {
+        console.error('[IOSMirror] Player error:', JSON.stringify(event));
+        scheduleRetry();
+      }
     );
 
-    // Intercept load requests so we can log the incoming HLS URL
+    // Save media info from every LOAD so retry has it.
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
       (request) => {
+        lastMedia  = request.media;
+        retryCount = 0;
+        clearTimeout(retryTimer);
         console.log('[IOSMirror] Loading stream:', request.media?.contentId ?? request.media?.contentUrl);
         return request;
       }
     );
 
     context.start({
-      maxInactivity:          3600,   // keep receiver alive up to 1 hour idle
+      maxInactivity:           3600,
       touchScreenOptimizedApp: false,
     });
   </script>

@@ -4,14 +4,12 @@ import ReplayKit
 import UIKit
 import Darwin
 
-/// React Native native module that bridges the JS layer to the Google Cast SDK
-/// and the HLS stream server.
+/// React Native native module that bridges the JS layer to the Google Cast SDK.
+/// HLS encoding and serving now live entirely in the BroadcastExtension process.
 @objc(MirrorBridge)
 final class MirrorBridge: RCTEventEmitter {
 
     private var hasListeners = false
-
-    // Token for Darwin notify registration; -1 = not registered.
     private var broadcastStoppedToken: Int32 = -1
 
     // MARK: - RCTEventEmitter
@@ -22,13 +20,8 @@ final class MirrorBridge: RCTEventEmitter {
         ["onDevicesChanged", "onCastStateChanged", "onScanComplete", "onDebug"]
     }
 
-    override func startObserving() {
-        hasListeners = true
-    }
-
-    override func stopObserving() {
-        hasListeners = false
-    }
+    override func startObserving() { hasListeners = true  }
+    override func stopObserving()  { hasListeners = false }
 
     // MARK: - JS-callable Methods
 
@@ -53,7 +46,6 @@ final class MirrorBridge: RCTEventEmitter {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
-            // Confirm the JS→native bridge is alive.
             self.emit("onDebug", body: "start_mirror_called")
 
             let dm = GCKCastContext.sharedInstance().discoveryManager
@@ -67,43 +59,7 @@ final class MirrorBridge: RCTEventEmitter {
                 return
             }
 
-            HLSStreamServer.shared.start()
-
-            // Fires once port 9090 is actually bound and ready to accept.
-            HLSStreamServer.shared.onListenerReady = { [weak self] in
-                self?.emit("onDebug", body: "listener_ready:9090")
-            }
-
-            // Fires when the extension's TCP connection is established.
-            HLSStreamServer.shared.onExtensionConnected = { [weak self] in
-                self?.emit("onDebug", body: "tcp_connected")
-            }
-
-            // Fires when the first .ts segment is written to disk.
-            // If Cast is already up, load immediately; otherwise didStart handles it.
-            HLSStreamServer.shared.onFirstSegmentReady = { [weak self] in
-                guard let self else { return }
-                self.emit("onDebug", body: "first_segment_ready")
-                DispatchQueue.main.async {
-                    if let session = GCKCastContext.sharedInstance().sessionManager.currentCastSession {
-                        self.loadStream(on: session)
-                    }
-                    // else: Cast isn't connected yet — didStart will call loadStream
-                    // once it connects and finds segmentCount > 0.
-                }
-            }
-
-            // Belt-and-suspenders stop: TCP control frame from extension.
-            HLSStreamServer.shared.onBroadcastStopped = { [weak self] in
-                guard let self else { return }
-                self.emit("onDebug", body: "stopped_via_tcp")
-                self.cancelBroadcastNotifications()
-                GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
-                HLSStreamServer.shared.stop()
-                self.emit("onCastStateChanged", body: ["state": "idle"])
-            }
-
-            // Darwin notification stop: fires when user taps iOS stop button.
+            // Listen for the broadcast extension stopping.
             var stoppedTok: Int32 = -1
             notify_register_dispatch(
                 "com.iosmirror.broadcastStopped", &stoppedTok, .main
@@ -112,15 +68,13 @@ final class MirrorBridge: RCTEventEmitter {
                 self.emit("onDebug", body: "stopped_via_darwin")
                 self.cancelBroadcastNotifications()
                 GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
-                HLSStreamServer.shared.stop()
                 self.emit("onCastStateChanged", body: ["state": "idle"])
             }
             self.broadcastStoppedToken = stoppedTok
 
-            // Start Cast and show the broadcast picker at the same time.
-            // The picker goes up immediately (no 5-second wait for Cast).
-            // Video loads via onFirstSegmentReady (Cast already up) or
-            // sessionManager:didStart: (Cast connects after broadcast starts).
+            // Start Cast session while app is foregrounded; show picker simultaneously.
+            // sessionManager:didStart: immediately sends the HLS URL to Chromecast.
+            // The receiver retries fetches until the extension's HTTP server is up.
             GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
             self.triggerBroadcastPicker()
             resolve(nil)
@@ -133,10 +87,7 @@ final class MirrorBridge: RCTEventEmitter {
     ) {
         DispatchQueue.main.async {
             self.cancelBroadcastNotifications()
-            HLSStreamServer.shared.onBroadcastStopped  = nil
-            HLSStreamServer.shared.onFirstSegmentReady = nil
             GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
-            HLSStreamServer.shared.stop()
             resolve(nil)
         }
     }
@@ -155,9 +106,11 @@ final class MirrorBridge: RCTEventEmitter {
         sendEvent(withName: name, body: body)
     }
 
-    /// Loads the HLS URL on the connected Chromecast session.
     private func loadStream(on session: GCKCastSession) {
-        guard let url = HLSStreamServer.shared.streamURL else { return }
+        guard let url = HLSStreamServer.shared.streamURL else {
+            emit("onDebug", body: "load_stream_no_ip")
+            return
+        }
         let builder = GCKMediaInformationBuilder(contentURL: url)
         builder.streamType = .live
         builder.contentType = "application/vnd.apple.mpegurl"
@@ -165,7 +118,7 @@ final class MirrorBridge: RCTEventEmitter {
         let request = GCKMediaLoadRequestDataBuilder()
         request.mediaInformation = media
         session.remoteMediaClient?.loadMedia(with: request.build())
-        emit("onDebug", body: "load_stream_called:\(url)")
+        emit("onDebug", body: "load_stream:\(url)")
     }
 
     private func installedBroadcastExtensionBundleID() -> String? {
@@ -177,7 +130,6 @@ final class MirrorBridge: RCTEventEmitter {
             .flatMap { Bundle(url: $0)?.bundleIdentifier }
     }
 
-    /// Shows the iOS system broadcast picker so the user can tap "Start Broadcast".
     private func triggerBroadcastPicker() {
         guard let windowScene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
@@ -208,12 +160,9 @@ extension MirrorBridge: GCKSessionManagerListener {
         didStart session: GCKCastSession
     ) {
         emit("onDebug", body: "cast_connected")
-        // If the broadcast started before Cast finished connecting,
-        // segments are already on disk — load the stream immediately.
-        if HLSStreamServer.shared.segmentCount > 0 {
-            loadStream(on: session)
-        }
-        // Otherwise onFirstSegmentReady will call loadStream once segments arrive.
+        // Load the extension's URL immediately. The Chromecast receiver will
+        // retry until the extension's HTTP server comes up on port 8080.
+        loadStream(on: session)
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
@@ -231,9 +180,6 @@ extension MirrorBridge: GCKSessionManagerListener {
         withError error: Error
     ) {
         cancelBroadcastNotifications()
-        HLSStreamServer.shared.onBroadcastStopped  = nil
-        HLSStreamServer.shared.onFirstSegmentReady = nil
-        HLSStreamServer.shared.stop()
         emit("onCastStateChanged", body: ["state": "idle"])
         emit("onDebug", body: "cast_failed:\(error.localizedDescription)")
     }
@@ -257,9 +203,7 @@ extension MirrorBridge: GCKDiscoveryManagerListener {
         emit("onDevicesChanged", body: list)
     }
 
-    func didHaveDiscoveryRequest() {
-        // nothing needed
-    }
+    func didHaveDiscoveryRequest() {}
 
     func discoveryManagerDidStopDiscovery(_ discoveryManager: GCKDiscoveryManager) {
         emit("onScanComplete", body: NSNull())
