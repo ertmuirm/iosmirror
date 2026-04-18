@@ -8,8 +8,7 @@ import UIKit
 @objc(MirrorBridge)
 final class MirrorBridge: RCTEventEmitter {
 
-    private var hasListeners  = false
-    private var pendingDevice: GCKDevice?
+    private var hasListeners = false
 
     // MARK: - RCTEventEmitter
 
@@ -60,24 +59,14 @@ final class MirrorBridge: RCTEventEmitter {
                 reject("NOT_FOUND", "Chromecast device not found", nil)
                 return
             }
-            self.pendingDevice = device
 
-            // Start the HLS server now so the extension can connect the moment
-            // the user taps "Start Broadcasting" in the system picker.
             HLSStreamServer.shared.start()
 
-            // Start the Cast session only AFTER the extension connects —
-            // this way the TV doesn't go dark until recording has actually begun.
-            HLSStreamServer.shared.onExtensionConnected = { [weak self] in
-                guard let device = self?.pendingDevice else { return }
-                self?.pendingDevice = nil
-                DispatchQueue.main.async {
-                    GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
-                }
-            }
-
-            // Show the picker immediately so the user can start broadcasting.
+            // Show the picker first so the user initiates broadcast before the
+            // Cast session connects. Cast takes 3-5 s to connect; the TV won't
+            // go dark until after the user has had a chance to tap Start Broadcast.
             self.triggerBroadcastPicker()
+            GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
             resolve(nil)
         }
     }
@@ -87,9 +76,7 @@ final class MirrorBridge: RCTEventEmitter {
         reject _: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
-            self.pendingDevice = nil
-            HLSStreamServer.shared.onExtensionConnected = nil
-            HLSStreamServer.shared.onFirstSegmentReady  = nil
+            HLSStreamServer.shared.onFirstSegmentReady = nil
             GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
             HLSStreamServer.shared.stop()
             resolve(nil)
