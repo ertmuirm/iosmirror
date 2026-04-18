@@ -98,7 +98,9 @@ final class HLSStreamServer {
     // MARK: - Extension TCP Listener (port 9090)
 
     private func startExtensionServer() {
-        guard let listener = try? NWListener(using: .tcp, on: extensionPort) else { return }
+        let params = NWParameters.tcp
+        params.allowLocalEndpointReuse = true   // SO_REUSEADDR: safe to rebind after stop
+        guard let listener = try? NWListener(using: params, on: extensionPort) else { return }
         extensionListener = listener
         listener.newConnectionHandler = { [weak self] conn in
             conn.start(queue: self?.queue ?? .global())

@@ -2,6 +2,7 @@ import ReplayKit
 import VideoToolbox
 import Network
 import CoreMedia
+import Darwin
 
 // MARK: - C-compatible encoder output callback (must be outside the class)
 
@@ -40,6 +41,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - RPBroadcastSampleHandler
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        // Signal the host app immediately — before TCP even connects — so the
+        // Cast session starts as soon as the countdown finishes.
+        notify_post("com.iosmirror.broadcastStarted")
         connectToHLSServer()
         // Encoder is set up lazily on the first video frame so we can use
         // the actual pixel buffer dimensions (UIScreen.main is unavailable
@@ -55,7 +59,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
     }
 
     override func broadcastFinished() {
-        sendControl("stop")
+        notify_post("com.iosmirror.broadcastStopped")
+        sendControl("stop")   // belt-and-suspenders via TCP
         compressionSession.map { VTCompressionSessionInvalidate($0) }
         compressionSession = nil
         connection?.cancel()
