@@ -62,6 +62,14 @@ final class MirrorBridge: RCTEventEmitter {
 
             HLSStreamServer.shared.start()
 
+            // End the Cast session automatically if the user stops the broadcast
+            // from the iOS system UI (red recording pill → Stop Broadcast).
+            HLSStreamServer.shared.onBroadcastStopped = { [weak self] in
+                GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
+                HLSStreamServer.shared.stop()
+                self?.emit("onCastStateChanged", body: ["state": "idle"])
+            }
+
             // Show the picker first so the user initiates broadcast before the
             // Cast session connects. Cast takes 3-5 s to connect; the TV won't
             // go dark until after the user has had a chance to tap Start Broadcast.
@@ -76,6 +84,7 @@ final class MirrorBridge: RCTEventEmitter {
         reject _: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
+            HLSStreamServer.shared.onBroadcastStopped  = nil
             HLSStreamServer.shared.onFirstSegmentReady = nil
             GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
             HLSStreamServer.shared.stop()
@@ -144,16 +153,10 @@ extension MirrorBridge: GCKSessionManagerListener {
         _ sessionManager: GCKSessionManager,
         didStart session: GCKCastSession
     ) {
-        // If the first segment was flushed before the Cast session connected
-        // (race: segment takes ~2 s, Cast setup takes 3-5 s), load immediately.
-        // Otherwise register the callback so loadStream fires when it's ready.
-        if HLSStreamServer.shared.segmentCount > 0 {
-            loadStream(on: session)
-        } else {
-            HLSStreamServer.shared.onFirstSegmentReady = { [weak self] in
-                self?.loadStream(on: session)
-            }
-        }
+        // Tell the Chromecast about the HLS URL now. The Default Media Receiver's
+        // live HLS player will poll the manifest and buffer until segments arrive,
+        // so there is no need to wait for the first segment before loading.
+        loadStream(on: session)
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
@@ -170,6 +173,7 @@ extension MirrorBridge: GCKSessionManagerListener {
         didFailToStart session: GCKCastSession,
         withError error: Error
     ) {
+        HLSStreamServer.shared.onBroadcastStopped  = nil
         HLSStreamServer.shared.onFirstSegmentReady = nil
         HLSStreamServer.shared.stop()
         emit("onCastStateChanged", body: ["state": "idle"])

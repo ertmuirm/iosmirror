@@ -25,6 +25,7 @@ final class HLSStreamServer {
     private(set) var segmentCount = 0   // incremented each time a segment is flushed
     var onExtensionConnected: (() -> Void)?
     var onFirstSegmentReady:  (() -> Void)?
+    var onBroadcastStopped:   (() -> Void)?
 
     private var httpListener:      NWListener?
     private var extensionListener: NWListener?
@@ -44,12 +45,13 @@ final class HLSStreamServer {
 
     private init() {
         setupSegmentDir()
-        localIP = detectLocalIP() ?? "127.0.0.1"
     }
 
     // MARK: - Lifecycle
 
     func start() {
+        // Re-detect every session so we pick up IP changes (DHCP renewal, etc.)
+        localIP = detectLocalIP() ?? "127.0.0.1"
         streamURL = URL(string: "http://\(localIP):\(httpPort)/stream/index.m3u8")
         startExtensionServer()
         startHTTPServer()
@@ -139,8 +141,13 @@ final class HLSStreamServer {
             if type == 0x01 {
                 let pts90k = ptsMs * 90   // ms → 90 kHz ticks
                 handleVideoFrame(payload, pts90k: pts90k)
+            } else if type == 0xFF {
+                if String(data: payload, encoding: .utf8) == "stop" {
+                    let cb = onBroadcastStopped
+                    onBroadcastStopped = nil
+                    DispatchQueue.main.async { cb?() }
+                }
             }
-            // control messages (0xFF) are ignored for now
         }
     }
 
@@ -219,6 +226,7 @@ final class HLSStreamServer {
         segmentCount         = 0
         onExtensionConnected = nil
         onFirstSegmentReady  = nil
+        onBroadcastStopped   = nil
     }
 
     // MARK: - HTTP Server (port 8080)
