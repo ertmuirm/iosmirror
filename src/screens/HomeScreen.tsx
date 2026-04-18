@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import DeviceList from '../components/DeviceList';
 import { useMirrorBridge } from '../hooks/useMirrorBridge';
@@ -16,6 +17,7 @@ export default function HomeScreen(): React.JSX.Element {
     scanning,
     castState,
     selectedDevice,
+    debugLog,
     selectDevice,
     startMirror,
     stopMirror,
@@ -71,6 +73,15 @@ export default function HomeScreen(): React.JSX.Element {
           <View style={styles.badgeDot} />
           <Text style={styles.badgeText}>Mirroring to {selectedDevice.name}</Text>
         </View>
+      )}
+
+      {/* Debug log */}
+      {debugLog.length > 0 && (
+        <ScrollView style={styles.debugBox} nestedScrollEnabled>
+          {debugLog.map((msg, i) => (
+            <Text key={i} style={styles.debugText}>{msg}</Text>
+          ))}
+        </ScrollView>
       )}
 
       {/* Start/stop button */}
@@ -154,5 +165,18 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  debugBox: {
+    backgroundColor: '#111',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 14,
+    maxHeight: 100,
+  },
+  debugText: {
+    color: '#19FFA3',
+    fontSize: 11,
+    fontFamily: 'Menlo',
+    lineHeight: 16,
   },
 });

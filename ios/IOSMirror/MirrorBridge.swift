@@ -23,7 +23,7 @@ final class MirrorBridge: RCTEventEmitter {
     override static func requiresMainQueueSetup() -> Bool { false }
 
     override func supportedEvents() -> [String] {
-        ["onDevicesChanged", "onCastStateChanged", "onScanComplete"]
+        ["onDevicesChanged", "onCastStateChanged", "onScanComplete", "onDebug"]
     }
 
     override func startObserving() {
@@ -70,6 +70,11 @@ final class MirrorBridge: RCTEventEmitter {
 
             self.pendingDevice = device
             HLSStreamServer.shared.start()
+
+            // Diagnostic: fires when the extension TCP-connects to port 9090.
+            HLSStreamServer.shared.onExtensionConnected = { [weak self] in
+                self?.emit("onDebug", body: "tcp_connected")
+            }
 
             // "broadcastStarted" fires the moment the extension's 3-second
             // countdown finishes — before the first TCP frame arrives.

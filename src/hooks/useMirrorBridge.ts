@@ -17,6 +17,7 @@ export function useMirrorBridge() {
   const [scanning, setScanning] = useState(true);
   const [castState, setCastState] = useState<CastState>('idle');
   const [selectedDevice, setSelectedDevice] = useState<CastDevice | null>(null);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
   const subscriptions = useRef<ReturnType<typeof mirrorEmitter.addListener>[]>([]);
 
   useEffect(() => {
@@ -30,6 +31,9 @@ export function useMirrorBridge() {
       }),
       mirrorEmitter.addListener('onScanComplete', () => {
         setScanning(false);
+      }),
+      mirrorEmitter.addListener('onDebug', (msg: string) => {
+        setDebugLog(prev => [...prev.slice(-9), msg]);
       }),
     ];
 
@@ -69,6 +73,7 @@ export function useMirrorBridge() {
     scanning,
     castState,
     selectedDevice,
+    debugLog,
     selectDevice,
     startMirror,
     stopMirror,

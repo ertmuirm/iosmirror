@@ -234,7 +234,9 @@ final class HLSStreamServer {
     // MARK: - HTTP Server (port 8080)
 
     private func startHTTPServer() {
-        guard let listener = try? NWListener(using: .tcp, on: httpPort) else { return }
+        let params = NWParameters.tcp
+        params.allowLocalEndpointReuse = true
+        guard let listener = try? NWListener(using: params, on: httpPort) else { return }
         httpListener = listener
         listener.newConnectionHandler = { [weak self] conn in
             conn.start(queue: self?.queue ?? .global())
