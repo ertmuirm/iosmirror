@@ -157,8 +157,15 @@ extension MirrorBridge: GCKSessionManagerListener {
         _ sessionManager: GCKSessionManager,
         didStart session: GCKCastSession
     ) {
-        HLSStreamServer.shared.onFirstSegmentReady = { [weak self] in
-            self?.loadStream(on: session)
+        // If the first segment was flushed before the Cast session connected
+        // (race: segment takes ~2 s, Cast setup takes 3-5 s), load immediately.
+        // Otherwise register the callback so loadStream fires when it's ready.
+        if HLSStreamServer.shared.segmentCount > 0 {
+            loadStream(on: session)
+        } else {
+            HLSStreamServer.shared.onFirstSegmentReady = { [weak self] in
+                self?.loadStream(on: session)
+            }
         }
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }

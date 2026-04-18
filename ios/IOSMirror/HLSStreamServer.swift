@@ -22,6 +22,7 @@ final class HLSStreamServer {
     // MARK: - State
 
     private(set) var streamURL: URL?
+    private(set) var segmentCount = 0   // incremented each time a segment is flushed
     var onExtensionConnected: (() -> Void)?
     var onFirstSegmentReady:  (() -> Void)?
 
@@ -188,9 +189,10 @@ final class HLSStreamServer {
         try? segmentData.write(to: path, options: .atomic)
         segments.append(name)
         segmentIndex += 1
+        segmentCount += 1
         segmentData = Data()
 
-        if segmentIndex == 1 {
+        if segmentCount == 1 {
             let cb = onFirstSegmentReady
             onFirstSegmentReady = nil
             DispatchQueue.main.async { cb?() }
@@ -214,6 +216,7 @@ final class HLSStreamServer {
         segmentStartPTS = Int64.min
         receiveBuffer = Data()
         packetizer = TSPacketizer()
+        segmentCount         = 0
         onExtensionConnected = nil
         onFirstSegmentReady  = nil
     }
