@@ -75,14 +75,15 @@ export default function HomeScreen(): React.JSX.Element {
         </View>
       )}
 
-      {/* Debug log */}
-      {debugLog.length > 0 && (
-        <ScrollView style={styles.debugBox} nestedScrollEnabled>
-          {debugLog.map((msg, i) => (
-            <Text key={i} style={styles.debugText}>{msg}</Text>
-          ))}
-        </ScrollView>
-      )}
+      {/* Debug log — always visible so "no events" is itself diagnostic */}
+      <ScrollView style={styles.debugBox} nestedScrollEnabled>
+        {debugLog.length === 0
+          ? <Text style={styles.debugText}>debug: waiting…</Text>
+          : debugLog.map((msg, i) => (
+              <Text key={i} style={styles.debugText}>{msg}</Text>
+            ))
+        }
+      </ScrollView>
 
       {/* Start/stop button */}
       <TouchableOpacity

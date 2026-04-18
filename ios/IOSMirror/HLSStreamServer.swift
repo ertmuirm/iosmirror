@@ -23,6 +23,7 @@ final class HLSStreamServer {
 
     private(set) var streamURL: URL?
     private(set) var segmentCount = 0   // incremented each time a segment is flushed
+    var onListenerReady:      (() -> Void)?
     var onExtensionConnected: (() -> Void)?
     var onFirstSegmentReady:  (() -> Void)?
     var onBroadcastStopped:   (() -> Void)?
@@ -102,6 +103,15 @@ final class HLSStreamServer {
         params.allowLocalEndpointReuse = true   // SO_REUSEADDR: safe to rebind after stop
         guard let listener = try? NWListener(using: params, on: extensionPort) else { return }
         extensionListener = listener
+        listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            if case .ready = state {
+                if let cb = self.onListenerReady {
+                    self.onListenerReady = nil
+                    DispatchQueue.main.async { cb() }
+                }
+            }
+        }
         listener.newConnectionHandler = { [weak self] conn in
             conn.start(queue: self?.queue ?? .global())
             self?.receiveLoop(conn)
@@ -226,6 +236,7 @@ final class HLSStreamServer {
         receiveBuffer = Data()
         packetizer = TSPacketizer()
         segmentCount         = 0
+        onListenerReady      = nil
         onExtensionConnected = nil
         onFirstSegmentReady  = nil
         onBroadcastStopped   = nil
