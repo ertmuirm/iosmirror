@@ -210,8 +210,21 @@ override func stopObserving()  {
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
         let extID = installedBroadcastExtensionBundleID() ?? "NOT_FOUND"
         self.emit("onDebug", body: "extension_bundle_id:\(extID)")
+        
+        // Verify extension exists before creating picker
+        guard extID != "NOT_FOUND" else {
+            self.emit("onDebug", body: "ERROR_extension_not_found")
+            os_log("Extension not found!", log: logger, type: .error)
+            return
+        }
+        
         picker.preferredExtension = extID
         picker.showsMicrophoneButton = false
+        
+        // Make picker visible for user to tap manually if needed
+        picker.backgroundColor = .clear
+        picker.alpha = 0.01  // Nearly invisible but still tappable
+        
         rootVC.view.addSubview(picker)
         self.emit("onDebug", body: "picker_added_to_view")
         
