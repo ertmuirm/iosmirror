@@ -63,12 +63,16 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - RPBroadcastSampleHandler
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        NSLog("IOSMirror Extension: broadcastStarted CALLED")
         os_log("broadcastStarted CALLED with setupInfo: %{public}@", log: extLogger, type: .info, setupInfo as NSObject)
         setupSegmentDir()
+        NSLog("IOSMirror Extension: setupSegmentDir done")
         os_log("setupSegmentDir done", log: extLogger, type: .info)
         localIP = detectLocalIP() ?? "127.0.0.1"
+        NSLog("IOSMirror Extension: localIP: %@", localIP)
         os_log("localIP: %{public}@", log: extLogger, type: .info, localIP)
         startHTTPServer()
+        NSLog("IOSMirror Extension: HTTP server started")
         os_log("HTTP server started", log: extLogger, type: .info)
         
         // Listen for stop command from the main app.
@@ -138,6 +142,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         _ sampleBuffer: CMSampleBuffer,
         with sampleBufferType: RPSampleBufferType
     ) {
+        NSLog("IOSMirror Extension: processSampleBuffer type: %d", sampleBufferType.rawValue)
         os_log("processSampleBuffer type: %{public}d", log: extLogger, type: .info, sampleBufferType.rawValue)
         guard sampleBufferType == .video,
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
