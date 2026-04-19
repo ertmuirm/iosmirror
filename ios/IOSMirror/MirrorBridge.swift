@@ -59,7 +59,7 @@ override func stopObserving()  {
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
-        NSLog("IOSMirror: startMirror CALLED with deviceID: %@", deviceID)
+        self.emit("onDebug", body: "startMirror_calld_with:\(deviceID)")
         os_log("startMirror called for device: %{public}s", log: logger, type: .info, deviceID)
         DispatchQueue.main.async {
             self.emit("onDebug", body: "start_mirror_called")
@@ -194,14 +194,14 @@ override func stopObserving()  {
     }
 
     private func triggerBroadcastPicker() {
-        NSLog("IOSMirror: triggerBroadcastPicker CALLED")
+        self.emit("onDebug", body: "triggerBroadcastPicker_called")
         os_log("Triggering system broadcast picker", log: logger, type: .info)
         guard let windowScene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }),
               let rootVC = windowScene.windows.first?.rootViewController
         else { 
-            NSLog("IOSMirror: FAILED to find root view controller")
+            self.emit("onDebug", body: "failed_no_root_view_controller")
             os_log("Failed to find root view controller", log: logger, type: .error)
             return 
         }
@@ -211,6 +211,7 @@ override func stopObserving()  {
         picker.showsMicrophoneButton = false
         rootVC.view.addSubview(picker)
         self.emit("onDebug", body: "picker_added_to_view")
+        self.emit("onDebug", body: "picker_created_with_extension: \(installedBroadcastExtensionBundleID() ?? "nil")")
         
         os_log("Picker added to view, waiting for tap...", log: logger, type: .info)
 
