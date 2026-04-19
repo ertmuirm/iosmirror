@@ -59,6 +59,7 @@ override func stopObserving()  {
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
+        NSLog("IOSMirror: startMirror CALLED with deviceID: %@", deviceID)
         os_log("startMirror called for device: %{public}s", log: logger, type: .info, deviceID)
         DispatchQueue.main.async {
             self.emit("onDebug", body: "start_mirror_called")
@@ -193,12 +194,14 @@ override func stopObserving()  {
     }
 
     private func triggerBroadcastPicker() {
+        NSLog("IOSMirror: triggerBroadcastPicker CALLED")
         os_log("Triggering system broadcast picker", log: logger, type: .info)
         guard let windowScene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }),
               let rootVC = windowScene.windows.first?.rootViewController
         else { 
+            NSLog("IOSMirror: FAILED to find root view controller")
             os_log("Failed to find root view controller", log: logger, type: .error)
             return 
         }
@@ -207,35 +210,28 @@ override func stopObserving()  {
         picker.preferredExtension = installedBroadcastExtensionBundleID()
         picker.showsMicrophoneButton = false
         rootVC.view.addSubview(picker)
+        self.emit("onDebug", body: "picker_added_to_view")
         
         os_log("Picker added to view, waiting for tap...", log: logger, type: .info)
 
         // Add delay to let picker create subviews
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let buttons = picker.subviews.compactMap { $0 as? UIButton }
+            self.emit("onDebug", body: "picker_subviews:\(buttons.count)")
             os_log("Picker subviews: %{public}d, trying button tap", log: logger, type: .info, buttons.count)
             
-            // Try sending action first
+            // Try sendActions - the standard UIKit way
             if let button = buttons.first {
                 os_log("Trying sendActions tap", log: logger, type: .info)
+                self.emit("onDebug", body: "trying_sendActions")
                 button.sendActions(for: .touchUpInside)
+            } else {
+                // No button found - log all subviews for debugging
+                self.emit("onDebug", body: "no_button_all_subviews:\(picker.subviews.count)")
+                os_log("No button. All subviews: %{public}d", log: logger, type: .error, picker.subviews.count)
             }
             
-            // Also try private selector approach
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                for subview in picker.subviews {
-                    if let button = subview as? UIButton {
-                        // Try private selector
-                        let selector = NSSelectorFromString("buttonPressed:")
-                        if button.responds(to: selector) {
-                            os_log("Trying buttonPressed: private selector", log: logger, type: .info)
-                            button.perform(selector, with: nil)
-                            break
-                        }
-                    }
-                }
-            }
-            
+            // Remove picker after delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 picker.removeFromSuperview()
             }
