@@ -19,7 +19,6 @@ export default function DeviceList({ devices, selectedDevice, onSelect }: Props)
   if (devices.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyIcon}>📡</Text>
         <Text style={styles.emptyTitle}>No devices found</Text>
         <Text style={styles.emptyBody}>
           Make sure your Chromecast and iPhone are on the same Wi-Fi network.
@@ -77,10 +76,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
     paddingBottom: 60,
-  },
-  emptyIcon: {
-    fontSize: 40,
-    marginBottom: 16,
   },
   emptyTitle: {
     color: '#ffffff',
