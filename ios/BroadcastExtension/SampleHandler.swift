@@ -6,6 +6,11 @@ import Darwin
 import os.log
 import Foundation
 
+// Set up exception handler to catch crashes
+NSSetUncaughtExceptionHandler { exception in
+    NSLog("IOSMirror Extension: CRASH: \(exception.name) \(exception.reason ?? "no reason")")
+}
+
 // Import notification functions from Darwin
 @_silgen_name("notify_register_dispatch") private func notify_register_dispatch(
     _ name: UnsafePointer<CChar>,
@@ -91,6 +96,15 @@ final class SampleHandler: RPBroadcastSampleHandler {
         NSLog("IOSMirror Extension: HTTP server done, posting broadcastStarted notification")
         
         // Tell main app the broadcast is live so it can load stream on Cast.
+        // Use UserDefaults to communicate - app will check this
+        let sharedDefaults = UserDefaults(suiteName: "group.com.iosmirror")
+        sharedDefaults?.set(true, forKey: "broadcastDidStart")
+        sharedDefaults?.synchronize()
+        
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
+            nil, nil, true)
         var stopTok: Int32 = -1
         notify_register_dispatch(
             "com.iosmirror.stopBroadcast", &stopTok, queue
