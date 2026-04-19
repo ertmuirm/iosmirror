@@ -119,6 +119,7 @@ override func stopObserving()  {
             os_log("Triggering broadcast picker", log: logger, type: .info)
             self.emit("onDebug", body: "triggering_broadcast_picker")
             self.triggerBroadcastPicker()
+            self.emit("onDebug", body: "after_triggerBroadcastPicker_call")
             
             resolve(nil)
         }
@@ -207,11 +208,12 @@ override func stopObserving()  {
         }
 
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-        picker.preferredExtension = installedBroadcastExtensionBundleID()
+        let extID = installedBroadcastExtensionBundleID() ?? "NOT_FOUND"
+        self.emit("onDebug", body: "extension_bundle_id:\(extID)")
+        picker.preferredExtension = extID
         picker.showsMicrophoneButton = false
         rootVC.view.addSubview(picker)
         self.emit("onDebug", body: "picker_added_to_view")
-        self.emit("onDebug", body: "picker_created_with_extension: \(installedBroadcastExtensionBundleID() ?? "nil")")
         
         os_log("Picker added to view, waiting for tap...", log: logger, type: .info)
 
@@ -226,6 +228,7 @@ override func stopObserving()  {
                 os_log("Trying sendActions tap", log: logger, type: .info)
                 self.emit("onDebug", body: "trying_sendActions")
                 button.sendActions(for: .touchUpInside)
+                self.emit("onDebug", body: "sendActions_done")
             } else {
                 // No button found - log all subviews for debugging
                 self.emit("onDebug", body: "no_button_all_subviews:\(picker.subviews.count)")
@@ -235,8 +238,11 @@ override func stopObserving()  {
             // Remove picker after delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 picker.removeFromSuperview()
+                self.emit("onDebug", body: "picker_removed")
             }
         }
+        
+        self.emit("onDebug", body: "triggerPicker_function_end")
     }
 }
 
