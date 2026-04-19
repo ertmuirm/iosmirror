@@ -190,6 +190,14 @@ override func stopObserving()  {
 
     private func triggerBroadcastPicker() {
         os_log("Triggering system broadcast picker", log: logger, type: .info)
+        
+        guard let extensionBundleID = installedBroadcastExtensionBundleID() else {
+            os_log("Failed to find broadcast extension bundle ID", log: logger, type: .error)
+            emit("onDebug", body: "extension_bundle_id_not_found")
+            return
+        }
+        os_log("Found extension bundle ID: %{public}s", log: logger, type: .info, extensionBundleID)
+        
         guard let windowScene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }),
@@ -200,7 +208,7 @@ override func stopObserving()  {
         }
 
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-        picker.preferredExtension = installedBroadcastExtensionBundleID()
+        picker.preferredExtension = extensionBundleID
         picker.showsMicrophoneButton = false
         rootVC.view.addSubview(picker)
 
