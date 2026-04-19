@@ -78,8 +78,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - RPBroadcastSampleHandler
 
-    override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
-        NSLog("IOSMirror Extension: broadcastStarted CALLED")
+    override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
+        NSLog("=== IOSMirror Extension: broadcastStarted CALLED with setupInfo: \(String(describing: setupInfo)) ===")
         
         // Setup directory first
         NSLog("IOSMirror Extension: calling setupSegmentDir")
