@@ -74,44 +74,25 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - RPBroadcastSampleHandler
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
-        os_log("broadcastStarted called", log: extLogger, type: .info)
+        setupSegmentDir()
+        localIP = detectLocalIP() ?? "127.0.0.1"
+        startHTTPServer()
         
-        do {
-            try setupSegmentDir()
-            os_log("Segment dir setup complete", log: extLogger, type: .info)
-            
-            localIP = detectLocalIP() ?? "127.0.0.1"
-            os_log("IP detected: %{public}s", log: extLogger, type: .info, localIP)
-            
-            startHTTPServer()
-            os_log("HTTP server started", log: extLogger, type: .info)
-            
-            // Listen for stop command from the main app.
-            var stopTok: Int32 = -1
-            let result = notify_register_dispatch(
-                "com.iosmirror.stopBroadcast",
-                &stopTok,
-                queue
-            ) { [weak self] token in
-                guard let self else { return }
-                os_log("Stop broadcast notification received", log: extLogger, type: .info)
-                self.finishBroadcastWithUserStopped()
-            }
-            os_log("Registered stop notification, result: %d, token: %d", log: extLogger, type: .info, result, stopTok)
-            self.stopBroadcastToken = stopTok
-
-            // Tell the main app the broadcast is live so it can load the stream on Cast.
-            os_log("Posting broadcastStarted notification", log: extLogger, type: .info)
-            CFNotificationCenterPostNotification(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
-                nil, nil, true)
-            
-            os_log("broadcastStarted completed successfully", log: extLogger, type: .info)
-        } catch {
-            os_log("Error in broadcastStarted: %{public}s", log: extLogger, type: .error, error.localizedDescription)
-            finishBroadcastWithError(error)
+        // Listen for stop command from the main app.
+        var stopTok: Int32 = -1
+        notify_register_dispatch(
+            "com.iosmirror.stopBroadcast", &stopTok, queue
+        ) { [weak self] _ in
+            os_log("Stop broadcast notification received", log: extLogger, type: .info)
+            self?.finishBroadcastWithUserStopped()
         }
+        self.stopBroadcastToken = stopTok
+
+        // Tell the main app the broadcast is live so it can load the stream on Cast.
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
+            nil, nil, true)
     }
 
     override func broadcastPaused()  {}
@@ -120,7 +101,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastFinished() {
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
-            _ = notify_cancel(stopBroadcastToken)
+            notify_cancel(stopBroadcastToken)
             stopBroadcastToken = -1
         }
         
@@ -141,7 +122,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
-            _ = notify_cancel(stopBroadcastToken)
+            notify_cancel(stopBroadcastToken)
             stopBroadcastToken = -1
         }
         
@@ -155,6 +136,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
         compressionSession = nil
         httpListener?.cancel()
         httpListener = nil
+        
+        // This tells the system the broadcast ended.
+        finishBroadcastWithError(nil)
     }
 
     override func processSampleBuffer(
@@ -175,10 +159,10 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - Setup
 
-    private func setupSegmentDir() throws {
+    private func setupSegmentDir() {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("hls_ext", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
             for f in files { try? FileManager.default.removeItem(at: dir.appendingPathComponent(f)) }
         }
@@ -209,14 +193,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - HTTP Server (port 8080, serves to Chromecast directly)
 
     private func startHTTPServer() {
-        os_log("Starting HTTP server on port 8080", log: extLogger, type: .info)
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
-        guard let listener = try? NWListener(using: params, on: httpPort) else {
-            os_log("Failed to create NWListener", log: extLogger, type: .error)
-            return
-        }
-        os_log("NWListener created successfully", log: extLogger, type: .info)
+        guard let listener = try? NWListener(using: params, on: httpPort) else { return }
         httpListener = listener
         listener.newConnectionHandler = { [weak self] conn in
             conn.start(queue: self?.queue ?? .global())
@@ -344,7 +323,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
         let totalLength = CMBlockBufferGetDataLength(dataBuffer)
         var avccData = Data(count: totalLength)
-        _ = avccData.withUnsafeMutableBytes {
+        avccData.withUnsafeMutableBytes {
             CMBlockBufferCopyDataBytes(dataBuffer, atOffset: 0, dataLength: totalLength,
                                       destination: $0.baseAddress!)
         }

@@ -79,7 +79,6 @@ override func stopObserving()  {
 
             // Listen for the broadcast extension starting.
             // When broadcastStarted is received, the extension's HTTP server is up and ready.
-            // Only then do we start the Cast session.
             var startedTok: Int32 = -1
             notify_register_dispatch(
                 "com.iosmirror.broadcastStarted", &startedTok, .main
@@ -88,10 +87,10 @@ override func stopObserving()  {
                 os_log("broadcastStarted notification received", log: logger, type: .info)
                 self.emit("onDebug", body: "broadcast_started_notification")
                 
-                // Start Cast session only AFTER broadcast extension is successfully recording.
-                os_log("Starting Cast session", log: logger, type: .info)
-                self.emit("onDebug", body: "starting_cast_session")
-                GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
+                // Now load the stream - the extension's HTTP server is ready.
+                if let session = self.activeCastSession {
+                    self.loadStream(on: session)
+                }
             }
             self.broadcastStartedToken = startedTok
 
@@ -109,8 +108,13 @@ override func stopObserving()  {
             }
             self.broadcastStoppedToken = stoppedTok
 
-            // Trigger the system broadcast picker - the user will start the broadcast.
-            // The Cast session will be started after the broadcast extension successfully starts.
+            // Start Cast session while app is foregrounded; show picker simultaneously.
+            // The stream URL will be loaded when the broadcast extension starts and sends
+            // the broadcastStarted notification - this ensures the HTTP server is ready.
+            os_log("Starting Cast session", log: logger, type: .info)
+            self.emit("onDebug", body: "starting_cast_session")
+            GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
+            
             os_log("Triggering broadcast picker", log: logger, type: .info)
             self.emit("onDebug", body: "triggering_broadcast_picker")
             self.triggerBroadcastPicker()
@@ -190,14 +194,6 @@ override func stopObserving()  {
 
     private func triggerBroadcastPicker() {
         os_log("Triggering system broadcast picker", log: logger, type: .info)
-        
-        guard let extensionBundleID = installedBroadcastExtensionBundleID() else {
-            os_log("Failed to find broadcast extension bundle ID", log: logger, type: .error)
-            emit("onDebug", body: "extension_bundle_id_not_found")
-            return
-        }
-        os_log("Found extension bundle ID: %{public}s", log: logger, type: .info, extensionBundleID)
-        
         guard let windowScene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }),
@@ -207,54 +203,18 @@ override func stopObserving()  {
             return 
         }
 
-        // Create and configure the picker with proper sizing
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
-        picker.preferredExtension = extensionBundleID
+        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        picker.preferredExtension = installedBroadcastExtensionBundleID()
         picker.showsMicrophoneButton = false
-        
-        // Force layout
-        picker.setNeedsLayout()
-        picker.layoutIfNeeded()
-        
         rootVC.view.addSubview(picker)
-        
-        // Try multiple approaches to find and tap the button
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // Approach 1: Try to find UIButton in subviews
-            var buttonFound = false
-            for subview in picker.subviews {
-                if let button = subview as? UIButton {
-                    os_log("Found UIButton in subviews, tapping", log: logger, type: .info)
-                    button.sendActions(for: .touchUpInside)
-                    buttonFound = true
-                    break
-                }
-                // Check recursive subviews
-                for deeper in subview.subviews {
-                    if let deepButton = deeper as? UIButton {
-                        os_log("Found deep UIButton, tapping", log: logger, type: .info)
-                        deepButton.sendActions(for: .touchUpInside)
-                        buttonFound = true
-                        break
-                    }
-                }
-            }
-            
-            // Approach 2: Use performSelector if button not found
-            if !buttonFound {
-                os_log("No UIButton found, trying performSelector", log: logger, type: .info)
-                // On iOS 14+, this triggers the system broadcast picker
-                picker.perform(Selector(("buttonPressed:")))
-            }
-        }
 
-        os_log("Broadcast picker setup complete", log: logger, type: .info)
-        
-        // Keep the picker visible while user interacts with system broadcast UI
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { 
-            picker.removeFromSuperview()
-            os_log("Broadcast picker removed after timeout", log: logger, type: .info)
-        }
+        picker.subviews
+            .compactMap { $0 as? UIButton }
+            .first?
+            .sendActions(for: .touchUpInside)
+
+        os_log("Broadcast picker button tapped", log: logger, type: .info)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { picker.removeFromSuperview() }
     }
 }
 
@@ -268,10 +228,9 @@ extension MirrorBridge: GCKSessionManagerListener {
     ) {
         os_log("Cast session started", log: logger, type: .info)
         emit("onDebug", body: "cast_connected")
-        // Store session and load the stream.
-        // The broadcast extension's HTTP server is already running.
+        // Store session for when broadcast starts - don't load stream yet.
+        // The stream will be loaded after the broadcast extension starts and its HTTP server is ready.
         activeCastSession = session
-        loadStream(on: session)
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
