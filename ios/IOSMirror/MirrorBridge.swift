@@ -81,7 +81,6 @@ override func stopObserving()  {
 
             // Listen for the broadcast extension starting.
             // When broadcastStarted is received, the extension's HTTP server is up and ready.
-            // ONLY THEN do we start the Cast session (like Replica app).
             var startedTok: Int32 = -1
             notify_register_dispatch(
                 "com.iosmirror.broadcastStarted", &startedTok, .main
@@ -90,10 +89,10 @@ override func stopObserving()  {
                 os_log("broadcastStarted notification received", log: logger, type: .info)
                 self.emit("onDebug", body: "broadcast_started_notification")
                 
-                // Start Cast session ONLY AFTER broadcast extension is successfully recording
-                os_log("Starting Cast session after broadcast started", log: logger, type: .info)
-                self.emit("onDebug", body: "starting_cast_session")
+                // Start Cast session ONLY AFTER broadcast extension is successfully recording (like Replica)
                 if let dev = self.selectedDevice {
+                    os_log("Starting Cast session after broadcast started", log: logger, type: .info)
+                    self.emit("onDebug", body: "starting_cast_session")
                     GCKCastContext.sharedInstance().sessionManager.startSession(with: dev)
                 }
             }
@@ -112,7 +111,7 @@ override func stopObserving()  {
                 self.emit("onCastStateChanged", body: ["state": "idle"])
             }
             self.broadcastStoppedToken = stoppedTok
-            
+
             // Trigger the broadcast picker - the user will start the broadcast.
             // Cast session starts AFTER broadcast is successfully started (like Replica).
             os_log("Triggering broadcast picker", log: logger, type: .info)
