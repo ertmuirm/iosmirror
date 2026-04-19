@@ -16,6 +16,7 @@ final class MirrorBridge: RCTEventEmitter {
     private var broadcastStoppedToken: Int32 = -1
     private var broadcastStartedToken: Int32 = -1
     private var activeCastSession: GCKCastSession?
+    private var selectedDevice: GCKDevice?  // Stored for closure use
 
     // MARK: - RCTEventEmitter
 
@@ -76,6 +77,7 @@ override func stopObserving()  {
             }
 
             os_log("Found device: %{public}s", log: logger, type: .info, device.friendlyName ?? deviceID)
+            self.selectedDevice = device  // Store for closure use
 
             // Listen for the broadcast extension starting.
             // When broadcastStarted is received, the extension's HTTP server is up and ready.
@@ -91,7 +93,9 @@ override func stopObserving()  {
                 // Start Cast session ONLY AFTER broadcast extension is successfully recording
                 os_log("Starting Cast session after broadcast started", log: logger, type: .info)
                 self.emit("onDebug", body: "starting_cast_session")
-                GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
+                if let dev = self.selectedDevice {
+                    GCKCastContext.sharedInstance().sessionManager.startSession(with: dev)
+                }
             }
             self.broadcastStartedToken = startedTok
 
@@ -137,6 +141,7 @@ override func stopObserving()  {
             
             GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
             self.activeCastSession = nil
+            self.selectedDevice = nil  // Clear stored device
             os_log("Cast session ended", log: logger, type: .info)
             resolve(nil)
         }
