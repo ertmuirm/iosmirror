@@ -75,17 +75,22 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         NSLog("IOSMirror Extension: broadcastStarted CALLED")
-        setupSegmentDir()
-        NSLog("IOSMirror Extension: setupSegmentDir done")
-        os_log("setupSegmentDir done", log: extLogger, type: .info)
-        localIP = detectLocalIP() ?? "127.0.0.1"
-        NSLog("IOSMirror Extension: localIP: %@", localIP)
-        os_log("localIP: %{public}@", log: extLogger, type: .info, localIP)
-        startHTTPServer()
-        NSLog("IOSMirror Extension: HTTP server started")
-        os_log("HTTP server started", log: extLogger, type: .info)
         
-        // Listen for stop command from the main app.
+        // Setup directory first
+        NSLog("IOSMirror Extension: calling setupSegmentDir")
+        setupSegmentDir()
+        
+        // Detect IP
+        localIP = detectLocalIP() ?? "127.0.0.1"
+        
+        NSLog("IOSMirror Extension: setupSegmentDir done, localIP: %@", localIP)
+        
+        // Start HTTP server
+        NSLog("IOSMirror Extension: calling startHTTPServer")
+        startHTTPServer()
+        NSLog("IOSMirror Extension: HTTP server done, posting broadcastStarted notification")
+        
+        // Tell main app the broadcast is live so it can load stream on Cast.
         var stopTok: Int32 = -1
         notify_register_dispatch(
             "com.iosmirror.stopBroadcast", &stopTok, queue
@@ -106,6 +111,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastResumed() {}
 
     override func broadcastFinished() {
+        NSLog("IOSMirror Extension: broadcastFinished CALLED")
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
             notify_cancel(stopBroadcastToken)
