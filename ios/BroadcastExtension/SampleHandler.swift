@@ -7,14 +7,14 @@ import os.log
 import Foundation
 
 // Import notification functions from Darwin
-@_silgen_name("notify_register_dispatch") private extern func notify_register_dispatch(
+@_silgen_name("notify_register_dispatch") private func notify_register_dispatch(
     _ name: UnsafePointer<CChar>,
     _ out_token: UnsafeMutablePointer<Int32>,
     _ queue: DispatchQueue,
     _ handler: @escaping (Int32) -> Void
 ) -> Int32
 
-@_silgen_name("notify_cancel") private extern func notify_cancel(_ token: Int32) -> Int32
+@_silgen_name("notify_cancel") private func notify_cancel(_ token: Int32) -> Int32
 
 private let extLogger = OSLog(subsystem: "com.iosmirror.extension", category: "HTTPServer")
 
@@ -80,11 +80,13 @@ final class SampleHandler: RPBroadcastSampleHandler {
         
         // Listen for stop command from the main app.
         var stopTok: Int32 = -1
-        notify_register_dispatch(
-            "com.iosmirror.stopBroadcast", &stopTok, queue
-        ) { [weak self] _ in
+        _ = notify_register_dispatch(
+            "com.iosmirror.stopBroadcast",
+            &stopTok,
+            queue
+        ) { token in
             os_log("Stop broadcast notification received", log: extLogger, type: .info)
-            self?.finishBroadcastWithUserStopped()
+            self.finishBroadcastWithUserStopped()
         }
         self.stopBroadcastToken = stopTok
 
@@ -101,7 +103,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastFinished() {
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
-            notify_cancel(stopBroadcastToken)
+            _ = notify_cancel(stopBroadcastToken)
             stopBroadcastToken = -1
         }
         
@@ -122,7 +124,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
-            notify_cancel(stopBroadcastToken)
+            _ = notify_cancel(stopBroadcastToken)
             stopBroadcastToken = -1
         }
         
