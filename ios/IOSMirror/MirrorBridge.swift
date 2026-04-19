@@ -246,13 +246,6 @@ override func stopObserving()  {
                 // On iOS 14+, this triggers the system broadcast picker
                 picker.perform(Selector(("buttonPressed:")))
             }
-            
-            // Approach 3: Simulate tap at center
-            if !buttonFound {
-                let tapLocation = CGPoint(x: picker.bounds.midX, y: picker.bounds.midY)
-                let touch = UIEvent.EventType.touchesDown
-                // Send touch events
-            }
         }
 
         os_log("Broadcast picker setup complete", log: logger, type: .info)
