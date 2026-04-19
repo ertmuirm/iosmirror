@@ -138,8 +138,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
         httpListener = nil
         
         // This tells the system the broadcast ended.
-        let noError: NSError? = nil
-        finishBroadcastWithError(noError)
+        var err: Error?
+        finishBroadcastWithError(err)
     }
 
     override func processSampleBuffer(
