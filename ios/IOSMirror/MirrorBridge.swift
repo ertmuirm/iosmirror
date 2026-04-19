@@ -207,17 +207,33 @@ override func stopObserving()  {
         picker.preferredExtension = installedBroadcastExtensionBundleID()
         picker.showsMicrophoneButton = false
         rootVC.view.addSubview(picker)
+        
+        os_log("Picker added to view, waiting for tap...", log: logger, type: .info)
 
         // Add delay to let picker create subviews
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let buttons = picker.subviews.compactMap { $0 as? UIButton }
-            os_log("Picker subviews after delay: %{public}d", log: logger, type: .info, buttons.count)
+            os_log("Picker subviews: %{public}d, trying button tap", log: logger, type: .info, buttons.count)
             
+            // Try sending action first
             if let button = buttons.first {
-                os_log("Tapping broadcast button", log: logger, type: .info)
+                os_log("Trying sendActions tap", log: logger, type: .info)
                 button.sendActions(for: .touchUpInside)
-            } else {
-                os_log("No button found in picker", log: logger, type: .error)
+            }
+            
+            // Also try private selector approach
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                for subview in picker.subviews {
+                    if let button = subview as? UIButton {
+                        // Try private selector
+                        let selector = NSSelectorFromString("buttonPressed:")
+                        if button.responds(to: selector) {
+                            os_log("Trying buttonPressed: private selector", log: logger, type: .info)
+                            button.perform(selector, with: nil)
+                            break
+                        }
+                    }
+                }
             }
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
