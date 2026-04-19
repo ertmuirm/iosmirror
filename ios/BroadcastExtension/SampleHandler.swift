@@ -138,7 +138,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         httpListener = nil
         
         // This tells the system the broadcast ended.
-        finishBroadcastWithError(nil as Error?)
+        finishBroadcastWithError(nil)
     }
 
     override func processSampleBuffer(
@@ -323,7 +323,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
         let totalLength = CMBlockBufferGetDataLength(dataBuffer)
         var avccData = Data(count: totalLength)
-        _ = avccData.withUnsafeMutableBytes {
+        avccData.withUnsafeMutableBytes {
             CMBlockBufferCopyDataBytes(dataBuffer, atOffset: 0, dataLength: totalLength,
                                       destination: $0.baseAddress!)
         }
