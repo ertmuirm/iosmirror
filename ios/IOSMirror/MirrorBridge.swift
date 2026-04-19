@@ -79,7 +79,6 @@ override func stopObserving()  {
 
             // Listen for the broadcast extension starting.
             // When broadcastStarted is received, the extension's HTTP server is up and ready.
-            // ONLY THEN do we start the Cast session (like Replica app).
             var startedTok: Int32 = -1
             notify_register_dispatch(
                 "com.iosmirror.broadcastStarted", &startedTok, .main
@@ -88,10 +87,10 @@ override func stopObserving()  {
                 os_log("broadcastStarted notification received", log: logger, type: .info)
                 self.emit("onDebug", body: "broadcast_started_notification")
                 
-                // Start Cast session ONLY AFTER broadcast extension is successfully recording
-                os_log("Starting Cast session after broadcast started", log: logger, type: .info)
-                self.emit("onDebug", body: "starting_cast_session")
-                GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
+                // Now load the stream - the extension's HTTP server is ready.
+                if let session = self.activeCastSession {
+                    self.loadStream(on: session)
+                }
             }
             self.broadcastStartedToken = startedTok
 
@@ -108,9 +107,14 @@ override func stopObserving()  {
                 self.emit("onCastStateChanged", body: ["state": "idle"])
             }
             self.broadcastStoppedToken = stoppedTok
+
+            // Start Cast session while app is foregrounded; show picker simultaneously.
+            // The stream URL will be loaded when the broadcast extension starts and sends
+            // the broadcastStarted notification - this ensures the HTTP server is ready.
+            os_log("Starting Cast session", log: logger, type: .info)
+            self.emit("onDebug", body: "starting_cast_session")
+            GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
             
-            // Trigger the broadcast picker - the user will start the broadcast.
-            // Cast session starts AFTER broadcast is successfully started (like Replica).
             os_log("Triggering broadcast picker", log: logger, type: .info)
             self.emit("onDebug", body: "triggering_broadcast_picker")
             self.triggerBroadcastPicker()
@@ -224,9 +228,9 @@ extension MirrorBridge: GCKSessionManagerListener {
     ) {
         os_log("Cast session started", log: logger, type: .info)
         emit("onDebug", body: "cast_connected")
-        // Store session and load the stream - broadcast extension is already running
+        // Store session for when broadcast starts - don't load stream yet.
+        // The stream will be loaded after the broadcast extension starts and its HTTP server is ready.
         activeCastSession = session
-        loadStream(on: session)
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
