@@ -208,13 +208,22 @@ override func stopObserving()  {
         picker.showsMicrophoneButton = false
         rootVC.view.addSubview(picker)
 
-        picker.subviews
-            .compactMap { $0 as? UIButton }
-            .first?
-            .sendActions(for: .touchUpInside)
-
-        os_log("Broadcast picker button tapped", log: logger, type: .info)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { picker.removeFromSuperview() }
+        // Add delay to let picker create subviews
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let buttons = picker.subviews.compactMap { $0 as? UIButton }
+            os_log("Picker subviews after delay: %{public}d", log: logger, type: .info, buttons.count)
+            
+            if let button = buttons.first {
+                os_log("Tapping broadcast button", log: logger, type: .info)
+                button.sendActions(for: .touchUpInside)
+            } else {
+                os_log("No button found in picker", log: logger, type: .error)
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                picker.removeFromSuperview()
+            }
+        }
     }
 }
 
