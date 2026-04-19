@@ -403,6 +403,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.iosmirror";
 				PRODUCT_NAME = IOSMirror;
+					CODE_SIGN_ENTITLEMENTS = IOSMirror/IOSMirror.entitlements;
 				SWIFT_OBJC_BRIDGING_HEADER = "IOSMirror/IOSMirror-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -433,6 +434,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.iosmirror";
 				PRODUCT_NAME = IOSMirror;
+					CODE_SIGN_ENTITLEMENTS = IOSMirror/IOSMirror.entitlements;
 				SWIFT_OBJC_BRIDGING_HEADER = "IOSMirror/IOSMirror-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -455,6 +457,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.iosmirror.BroadcastExtension";
 				PRODUCT_NAME = BroadcastExtension;
+					CODE_SIGN_ENTITLEMENTS = BroadcastExtension/BroadcastExtension.entitlements;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -477,6 +480,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.iosmirror.BroadcastExtension";
 				PRODUCT_NAME = BroadcastExtension;
+					CODE_SIGN_ENTITLEMENTS = BroadcastExtension/BroadcastExtension.entitlements;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
