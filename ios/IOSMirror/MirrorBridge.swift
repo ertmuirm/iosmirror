@@ -203,18 +203,29 @@ override func stopObserving()  {
             return 
         }
 
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        // Create picker with larger size so button is easier to tap
+        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
         picker.preferredExtension = installedBroadcastExtensionBundleID()
         picker.showsMicrophoneButton = false
+        picker.isUserInteractionEnabled = true
         rootVC.view.addSubview(picker)
+        
+        os_log("Picker added to view, subviews: %{public}d", log: logger, type: .info, picker.subviews.count)
 
-        picker.subviews
-            .compactMap { $0 as? UIButton }
-            .first?
-            .sendActions(for: .touchUpInside)
-
-        os_log("Broadcast picker button tapped", log: logger, type: .info)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { picker.removeFromSuperview() }
+        // Try tapping the button after a short delay to ensure view is ready
+        DispatchQueue.main.async {
+            if let button = picker.subviews.compactMap({ $0 as? UIButton }).first {
+                os_log("Tapping broadcast button", log: logger, type: .info)
+                button.sendActions(for: .touchUpInside)
+            } else {
+                os_log("No button found in picker subviews", log: logger, type: .error)
+            }
+            
+            // Remove picker after delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { 
+                picker.removeFromSuperview()
+            }
+        }
     }
 }
 
