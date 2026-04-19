@@ -63,9 +63,13 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - RPBroadcastSampleHandler
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        os_log("broadcastStarted CALLED with setupInfo: %{public}@", log: extLogger, type: .info, setupInfo as NSObject)
         setupSegmentDir()
+        os_log("setupSegmentDir done", log: extLogger, type: .info)
         localIP = detectLocalIP() ?? "127.0.0.1"
+        os_log("localIP: %{public}@", log: extLogger, type: .info, localIP)
         startHTTPServer()
+        os_log("HTTP server started", log: extLogger, type: .info)
         
         // Listen for stop command from the main app.
         var stopTok: Int32 = -1
@@ -134,6 +138,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         _ sampleBuffer: CMSampleBuffer,
         with sampleBufferType: RPSampleBufferType
     ) {
+        os_log("processSampleBuffer type: %{public}d", log: extLogger, type: .info, sampleBufferType.rawValue)
         guard sampleBufferType == .video,
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
         else { return }
