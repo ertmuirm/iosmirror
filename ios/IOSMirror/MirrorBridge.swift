@@ -79,6 +79,7 @@ override func stopObserving()  {
 
             // Listen for the broadcast extension starting.
             // When broadcastStarted is received, the extension's HTTP server is up and ready.
+            // Only then do we start the Cast session.
             var startedTok: Int32 = -1
             notify_register_dispatch(
                 "com.iosmirror.broadcastStarted", &startedTok, .main
@@ -87,10 +88,10 @@ override func stopObserving()  {
                 os_log("broadcastStarted notification received", log: logger, type: .info)
                 self.emit("onDebug", body: "broadcast_started_notification")
                 
-                // Now load the stream - the extension's HTTP server is ready.
-                if let session = self.activeCastSession {
-                    self.loadStream(on: session)
-                }
+                // Start Cast session only AFTER broadcast extension is successfully recording.
+                os_log("Starting Cast session", log: logger, type: .info)
+                self.emit("onDebug", body: "starting_cast_session")
+                GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
             }
             self.broadcastStartedToken = startedTok
 
@@ -108,13 +109,8 @@ override func stopObserving()  {
             }
             self.broadcastStoppedToken = stoppedTok
 
-            // Start Cast session while app is foregrounded; show picker simultaneously.
-            // The stream URL will be loaded when the broadcast extension starts and sends
-            // the broadcastStarted notification - this ensures the HTTP server is ready.
-            os_log("Starting Cast session", log: logger, type: .info)
-            self.emit("onDebug", body: "starting_cast_session")
-            GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
-            
+            // Trigger the system broadcast picker - the user will start the broadcast.
+            // The Cast session will be started after the broadcast extension successfully starts.
             os_log("Triggering broadcast picker", log: logger, type: .info)
             self.emit("onDebug", body: "triggering_broadcast_picker")
             self.triggerBroadcastPicker()
@@ -214,7 +210,8 @@ override func stopObserving()  {
             .sendActions(for: .touchUpInside)
 
         os_log("Broadcast picker button tapped", log: logger, type: .info)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { picker.removeFromSuperview() }
+        // Keep the picker for longer to ensure the system has time to interact with it
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { picker.removeFromSuperview() }
     }
 }
 
@@ -228,9 +225,10 @@ extension MirrorBridge: GCKSessionManagerListener {
     ) {
         os_log("Cast session started", log: logger, type: .info)
         emit("onDebug", body: "cast_connected")
-        // Store session for when broadcast starts - don't load stream yet.
-        // The stream will be loaded after the broadcast extension starts and its HTTP server is ready.
+        // Store session and load the stream.
+        // The broadcast extension's HTTP server is already running.
         activeCastSession = session
+        loadStream(on: session)
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
