@@ -4,17 +4,6 @@ import Network
 import CoreMedia
 import Darwin
 import os.log
-import Foundation
-
-// Import notification functions from Darwin
-@_silgen_name("notify_register_dispatch") private func notify_register_dispatch(
-    _ name: UnsafePointer<CChar>,
-    _ out_token: UnsafeMutablePointer<Int32>,
-    _ queue: DispatchQueue,
-    _ handler: @escaping (Int32) -> Void
-) -> Int32
-
-@_silgen_name("notify_cancel") private func notify_cancel(_ token: Int32) -> Int32
 
 private let extLogger = OSLog(subsystem: "com.iosmirror.extension", category: "HTTPServer")
 
@@ -138,9 +127,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         httpListener = nil
         
         // This tells the system the broadcast ended.
-        // Pass NSError with code 0 (no error/success)
-        let successError = NSError(domain: NSOSStatusErrorDomain, code: 0)
-        finishBroadcastWithError(successError)
+        finishBroadcastWithError(nil)
     }
 
     override func processSampleBuffer(
@@ -325,7 +312,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
         let totalLength = CMBlockBufferGetDataLength(dataBuffer)
         var avccData = Data(count: totalLength)
-        _ = avccData.withUnsafeMutableBytes {
+        avccData.withUnsafeMutableBytes {
             CMBlockBufferCopyDataBytes(dataBuffer, atOffset: 0, dataLength: totalLength,
                                       destination: $0.baseAddress!)
         }

@@ -16,7 +16,6 @@ final class MirrorBridge: RCTEventEmitter {
     private var broadcastStoppedToken: Int32 = -1
     private var broadcastStartedToken: Int32 = -1
     private var activeCastSession: GCKCastSession?
-    private var selectedDevice: GCKDevice?  // Stored for closure use
 
     // MARK: - RCTEventEmitter
 
@@ -77,7 +76,6 @@ override func stopObserving()  {
             }
 
             os_log("Found device: %{public}s", log: logger, type: .info, device.friendlyName ?? deviceID)
-            self.selectedDevice = device  // Store for closure use
 
             // Listen for the broadcast extension starting.
             // When broadcastStarted is received, the extension's HTTP server is up and ready.
@@ -89,11 +87,9 @@ override func stopObserving()  {
                 os_log("broadcastStarted notification received", log: logger, type: .info)
                 self.emit("onDebug", body: "broadcast_started_notification")
                 
-                // Start Cast session ONLY AFTER broadcast extension is successfully recording (like Replica)
-                if let dev = self.selectedDevice {
-                    os_log("Starting Cast session after broadcast started", log: logger, type: .info)
-                    self.emit("onDebug", body: "starting_cast_session")
-                    GCKCastContext.sharedInstance().sessionManager.startSession(with: dev)
+                // Now load the stream - the extension's HTTP server is ready.
+                if let session = self.activeCastSession {
+                    self.loadStream(on: session)
                 }
             }
             self.broadcastStartedToken = startedTok
@@ -112,8 +108,13 @@ override func stopObserving()  {
             }
             self.broadcastStoppedToken = stoppedTok
 
-            // Trigger the broadcast picker - the user will start the broadcast.
-            // Cast session starts AFTER broadcast is successfully started (like Replica).
+            // Start Cast session while app is foregrounded; show picker simultaneously.
+            // The stream URL will be loaded when the broadcast extension starts and sends
+            // the broadcastStarted notification - this ensures the HTTP server is ready.
+            os_log("Starting Cast session", log: logger, type: .info)
+            self.emit("onDebug", body: "starting_cast_session")
+            GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
+            
             os_log("Triggering broadcast picker", log: logger, type: .info)
             self.emit("onDebug", body: "triggering_broadcast_picker")
             self.triggerBroadcastPicker()
@@ -140,7 +141,6 @@ override func stopObserving()  {
             
             GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
             self.activeCastSession = nil
-            self.selectedDevice = nil  // Clear stored device
             os_log("Cast session ended", log: logger, type: .info)
             resolve(nil)
         }
@@ -203,29 +203,18 @@ override func stopObserving()  {
             return 
         }
 
-        // Create picker with larger size so button is easier to tap
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
         picker.preferredExtension = installedBroadcastExtensionBundleID()
         picker.showsMicrophoneButton = false
-        picker.isUserInteractionEnabled = true
         rootVC.view.addSubview(picker)
-        
-        os_log("Picker added to view, subviews: %{public}d", log: logger, type: .info, picker.subviews.count)
 
-        // Try tapping the button after a short delay to ensure view is ready
-        DispatchQueue.main.async {
-            if let button = picker.subviews.compactMap({ $0 as? UIButton }).first {
-                os_log("Tapping broadcast button", log: logger, type: .info)
-                button.sendActions(for: .touchUpInside)
-            } else {
-                os_log("No button found in picker subviews", log: logger, type: .error)
-            }
-            
-            // Remove picker after delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { 
-                picker.removeFromSuperview()
-            }
-        }
+        picker.subviews
+            .compactMap { $0 as? UIButton }
+            .first?
+            .sendActions(for: .touchUpInside)
+
+        os_log("Broadcast picker button tapped", log: logger, type: .info)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { picker.removeFromSuperview() }
     }
 }
 
@@ -239,9 +228,9 @@ extension MirrorBridge: GCKSessionManagerListener {
     ) {
         os_log("Cast session started", log: logger, type: .info)
         emit("onDebug", body: "cast_connected")
-        // Store session and load the stream - broadcast extension is already running
+        // Store session for when broadcast starts - don't load stream yet.
+        // The stream will be loaded after the broadcast extension starts and its HTTP server is ready.
         activeCastSession = session
-        loadStream(on: session)
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
