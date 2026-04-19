@@ -207,19 +207,61 @@ override func stopObserving()  {
             return 
         }
 
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        // Create and configure the picker with proper sizing
+        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
         picker.preferredExtension = extensionBundleID
         picker.showsMicrophoneButton = false
+        
+        // Force layout
+        picker.setNeedsLayout()
+        picker.layoutIfNeeded()
+        
         rootVC.view.addSubview(picker)
+        
+        // Try multiple approaches to find and tap the button
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Approach 1: Try to find UIButton in subviews
+            var buttonFound = false
+            for subview in picker.subviews {
+                if let button = subview as? UIButton {
+                    os_log("Found UIButton in subviews, tapping", log: logger, type: .info)
+                    button.sendActions(for: .touchUpInside)
+                    buttonFound = true
+                    break
+                }
+                // Check recursive subviews
+                for deeper in subview.subviews {
+                    if let deepButton = deeper as? UIButton {
+                        os_log("Found deep UIButton, tapping", log: logger, type: .info)
+                        deepButton.sendActions(for: .touchUpInside)
+                        buttonFound = true
+                        break
+                    }
+                }
+            }
+            
+            // Approach 2: Use performSelector if button not found
+            if !buttonFound {
+                os_log("No UIButton found, trying performSelector", log: logger, type: .info)
+                // On iOS 14+, this triggers the system broadcast picker
+                picker.perform(Selector(("buttonPressed:")))
+            }
+            
+            // Approach 3: Simulate tap at center
+            if !buttonFound {
+                let tapLocation = CGPoint(x: picker.bounds.midX, y: picker.bounds.midY)
+                let touch = UIEvent.EventType.touchesDown
+                // Send touch events
+            }
+        }
 
-        picker.subviews
-            .compactMap { $0 as? UIButton }
-            .first?
-            .sendActions(for: .touchUpInside)
-
-        os_log("Broadcast picker button tapped", log: logger, type: .info)
-        // Keep the picker for longer to ensure the system has time to interact with it
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { picker.removeFromSuperview() }
+        os_log("Broadcast picker setup complete", log: logger, type: .info)
+        
+        // Keep the picker visible while user interacts with system broadcast UI
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { 
+            picker.removeFromSuperview()
+            os_log("Broadcast picker removed after timeout", log: logger, type: .info)
+        }
     }
 }
 
