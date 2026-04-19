@@ -15,6 +15,7 @@ final class MirrorBridge: RCTEventEmitter {
     private var hasListeners = false
     private var broadcastStoppedToken: Int32 = -1
     private var broadcastStartedToken: Int32 = -1
+    private var activeCastSession: GCKCastSession?
 
     // MARK: - RCTEventEmitter
 
@@ -77,6 +78,7 @@ override func stopObserving()  {
             os_log("Found device: %{public}s", log: logger, type: .info, device.friendlyName ?? deviceID)
 
             // Listen for the broadcast extension starting.
+            // When broadcastStarted is received, the extension's HTTP server is up and ready.
             var startedTok: Int32 = -1
             notify_register_dispatch(
                 "com.iosmirror.broadcastStarted", &startedTok, .main
@@ -84,6 +86,11 @@ override func stopObserving()  {
                 guard let self else { return }
                 os_log("broadcastStarted notification received", log: logger, type: .info)
                 self.emit("onDebug", body: "broadcast_started_notification")
+                
+                // Now load the stream - the extension's HTTP server is ready.
+                if let session = self.activeCastSession {
+                    self.loadStream(on: session)
+                }
             }
             self.broadcastStartedToken = startedTok
 
@@ -102,8 +109,8 @@ override func stopObserving()  {
             self.broadcastStoppedToken = stoppedTok
 
             // Start Cast session while app is foregrounded; show picker simultaneously.
-            // sessionManager:didStart: immediately sends the HLS URL to Chromecast.
-            // The receiver retries fetches until the extension's HTTP server is up.
+            // The stream URL will be loaded when the broadcast extension starts and sends
+            // the broadcastStarted notification - this ensures the HTTP server is ready.
             os_log("Starting Cast session", log: logger, type: .info)
             self.emit("onDebug", body: "starting_cast_session")
             GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
@@ -124,7 +131,16 @@ override func stopObserving()  {
         DispatchQueue.main.async {
             self.emit("onDebug", body: "stop_mirror_called")
             self.cancelBroadcastNotifications()
+            
+            // Post notification to stop the broadcast extension's screen recording.
+            // The extension listens for this and will stop encoding/close its HTTP server.
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName("com.iosmirror.stopBroadcast" as CFString),
+                nil, nil, true)
+            
             GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
+            self.activeCastSession = nil
             os_log("Cast session ended", log: logger, type: .info)
             resolve(nil)
         }
@@ -212,9 +228,9 @@ extension MirrorBridge: GCKSessionManagerListener {
     ) {
         os_log("Cast session started", log: logger, type: .info)
         emit("onDebug", body: "cast_connected")
-        // Load the extension's URL immediately. The Chromecast receiver will
-        // retry until the extension's HTTP server comes up on port 8080.
-        loadStream(on: session)
+        // Store session for when broadcast starts - don't load stream yet.
+        // The stream will be loaded after the broadcast extension starts and its HTTP server is ready.
+        activeCastSession = session
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
@@ -224,6 +240,7 @@ extension MirrorBridge: GCKSessionManagerListener {
         withError error: Error?
     ) {
         os_log("Cast session ended: %{public}s", log: logger, type: .info, error?.localizedDescription ?? "no error")
+        activeCastSession = nil
         emit("onCastStateChanged", body: ["state": "idle"])
     }
 

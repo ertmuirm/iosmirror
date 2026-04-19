@@ -3,6 +3,9 @@ import VideoToolbox
 import Network
 import CoreMedia
 import Darwin
+import os.log
+
+private let extLogger = OSLog(subsystem: "com.iosmirror.extension", category: "HTTPServer")
 
 // MARK: - VT encoder output callback (file-scope, C-compatible)
 
@@ -37,6 +40,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Encoder
     private var compressionSession: VTCompressionSession?
 
+    // MARK: - Stop notification
+    private var stopBroadcastToken: Int32 = -1
+
     // MARK: - HLS pipeline
     private var httpListener:     NWListener?
     private var segmentDir:       URL!
@@ -60,6 +66,16 @@ final class SampleHandler: RPBroadcastSampleHandler {
         setupSegmentDir()
         localIP = detectLocalIP() ?? "127.0.0.1"
         startHTTPServer()
+        
+        // Listen for stop command from the main app.
+        var stopTok: Int32 = -1
+        notify_register_dispatch(
+            "com.iosmirror.stopBroadcast", &stopTok, queue
+        ) { [weak self] _ in
+            os_log("Stop broadcast notification received", log: extLogger, type: .info)
+            self?.finishBroadcastWithUserStopped()
+        }
+        self.stopBroadcastToken = stopTok
 
         // Tell the main app the broadcast is live so it can load the stream on Cast.
         CFNotificationCenterPostNotification(
@@ -72,6 +88,12 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastResumed() {}
 
     override func broadcastFinished() {
+        // Clean up stop notification token.
+        if stopBroadcastToken != -1 {
+            notify_cancel(stopBroadcastToken)
+            stopBroadcastToken = -1
+        }
+        
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName("com.iosmirror.broadcastStopped" as CFString),
@@ -81,6 +103,31 @@ final class SampleHandler: RPBroadcastSampleHandler {
         compressionSession = nil
         httpListener?.cancel()
         httpListener = nil
+    }
+    
+    // Called when main app sends stopBroadcast notification.
+    private func finishBroadcastWithUserStopped() {
+        os_log("Finishing broadcast due to user stop", log: extLogger, type: .info)
+        
+        // Clean up stop notification token.
+        if stopBroadcastToken != -1 {
+            notify_cancel(stopBroadcastToken)
+            stopBroadcastToken = -1
+        }
+        
+        // Post broadcast stopped notification.
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.iosmirror.broadcastStopped" as CFString),
+            nil, nil, true)
+        
+        compressionSession.map { VTCompressionSessionInvalidate($0) }
+        compressionSession = nil
+        httpListener?.cancel()
+        httpListener = nil
+        
+        // This tells the system the broadcast ended.
+        finishBroadcastWithError(nil)
     }
 
     override func processSampleBuffer(
@@ -147,6 +194,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func serveHTTP(_ conn: NWConnection) {
+        os_log("TCP connected", log: extLogger, type: .info)
         conn.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { [weak self] data, _, _, _ in
             guard let self, let data,
                   let request = String(data: data, encoding: .utf8)
