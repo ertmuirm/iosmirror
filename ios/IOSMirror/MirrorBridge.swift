@@ -13,7 +13,6 @@ final class MirrorBridge: RCTEventEmitter {
 
     // Token for Darwin notify registration; -1 = not registered.
     private var broadcastStoppedToken: Int32 = -1
-    private var firstSegmentToken: Int32 = -1
 
     // MARK: - RCTEventEmitter
 
@@ -124,36 +123,8 @@ final class MirrorBridge: RCTEventEmitter {
             // sessionManager:didStart: (Cast connects after broadcast starts).
             GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
             self.triggerBroadcastPicker()
-            
-            // Also register for broadcastStarted in case we get killed
-            self.registerFirstSegmentHandler()
-            
             resolve(nil)
         }
-    }
-
-    // Handle firstSegmentReady from extension - load stream on Cast
-    private func registerFirstSegmentHandler() {
-        var segmentTok: Int32 = -1
-        notify_register_dispatch(
-            "com.iosmirror.firstSegmentReady", &segmentTok, .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            self.emit("onDebug", body: "firstSegmentReady_from_extension")
-            // Get stream URL from extension via App Group
-            let sharedDefaults = UserDefaults(suiteName: "group.com.iosmirror")
-            if let urlString = sharedDefaults?.string(forKey: "streamURL"),
-               let url = URL(string: urlString) {
-                // Load stream on Cast session
-                if let session = GCKCastContext.sharedInstance().sessionManager.currentCastSession {
-                    self.loadStreamURL(url, on: session)
-                } else {
-                    // Store URL for sessionManager:didStart to use
-                    self.pendingStreamURL = url
-                }
-            }
-        }
-        self.firstSegmentToken = segmentTok
     }
 
     @objc func stopMirror(
@@ -177,10 +148,6 @@ final class MirrorBridge: RCTEventEmitter {
             notify_cancel(broadcastStoppedToken)
             broadcastStoppedToken = -1
         }
-        if firstSegmentToken != -1 {
-            notify_cancel(firstSegmentToken)
-            firstSegmentToken = -1
-        }
     }
 
     private func emit(_ name: String, body: Any) {
@@ -188,11 +155,9 @@ final class MirrorBridge: RCTEventEmitter {
         sendEvent(withName: name, body: body)
     }
 
-    /// Pending stream URL waiting for Cast to connect.
-    private var pendingStreamURL: URL?
-
-    /// Loads a specific HLS URL on the connected Chromecast session.
-    private func loadStreamURL(_ url: URL, on session: GCKCastSession) {
+    /// Loads the HLS URL on the connected Chromecast session.
+    private func loadStream(on session: GCKCastSession) {
+        guard let url = HLSStreamServer.shared.streamURL else { return }
         let builder = GCKMediaInformationBuilder(contentURL: url)
         builder.streamType = .live
         builder.contentType = "application/vnd.apple.mpegurl"
@@ -200,13 +165,7 @@ final class MirrorBridge: RCTEventEmitter {
         let request = GCKMediaLoadRequestDataBuilder()
         request.mediaInformation = media
         session.remoteMediaClient?.loadMedia(with: request.build())
-        self.emit("onDebug", body: "load_stream:\(url)")
-    }
-
-    /// Loads the HLS URL from local server (legacy).
-    private func loadStream(on session: GCKCastSession) {
-        guard let url = HLSStreamServer.shared.streamURL else { return }
-        loadStreamURL(url, on: session)
+        emit("onDebug", body: "load_stream_called:\(url)")
     }
 
     private func installedBroadcastExtensionBundleID() -> String? {
@@ -249,21 +208,12 @@ extension MirrorBridge: GCKSessionManagerListener {
         didStart session: GCKCastSession
     ) {
         emit("onDebug", body: "cast_connected")
-        // If extension already sent a URL, use it
-        if let url = pendingStreamURL {
-            pendingStreamURL = nil
-            loadStreamURL(url, on: session)
-        }
-        // Otherwise check for URL in App Group (in case extension sent it)
-        let sharedDefaults = UserDefaults(suiteName: "group.com.iosmirror")
-        if let urlString = sharedDefaults?.string(forKey: "streamURL"),
-           let url = URL(string: urlString) {
-            loadStreamURL(url, on: session)
-        }
-        // Legacy: check local server
-        else if HLSStreamServer.shared.segmentCount > 0 {
+        // If the broadcast started before Cast finished connecting,
+        // segments are already on disk — load the stream immediately.
+        if HLSStreamServer.shared.segmentCount > 0 {
             loadStream(on: session)
         }
+        // Otherwise onFirstSegmentReady will call loadStream once segments arrive.
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
