@@ -7,6 +7,9 @@ import os.log
 import Foundation
 
 // Set up exception handler to catch crashes
+NSSetUncaughtExceptionHandler { exception in
+    NSLog("IOSMirror Extension: CRASH: \(exception.name) \(exception.reason ?? "no reason")")
+}
 
 // Import notification functions from Darwin
 @_silgen_name("notify_register_dispatch") private func notify_register_dispatch(
@@ -81,7 +84,6 @@ final class SampleHandler: RPBroadcastSampleHandler {
         // Setup directory first
         NSLog("IOSMirror Extension: calling setupSegmentDir")
         setupSegmentDir()
-        NSLog("IOSMirror Extension: setupSegmentDir completed")
         
         // Detect IP
         localIP = detectLocalIP() ?? "127.0.0.1"
@@ -92,7 +94,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         NSLog("IOSMirror Extension: calling startHTTPServer")
         
         // Try primary port 8080 first
-        let httpStarted = startHTTPServer()
+        var httpStarted = startHTTPServer()
         
         if !httpStarted {
             // Try alternate ports if 8080 fails
@@ -118,7 +120,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
             CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
             nil, nil, true)
         var stopTok: Int32 = -1
-        _ = notify_register_dispatch(
+        notify_register_dispatch(
             "com.iosmirror.stopBroadcast", &stopTok, queue
         ) { [weak self] _ in
             os_log("Stop broadcast notification received", log: extLogger, type: .info)
@@ -144,7 +146,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         finishBroadcastWithUserStopped()
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
-            _ = notify_cancel(stopBroadcastToken)
+            notify_cancel(stopBroadcastToken)
             stopBroadcastToken = -1
         }
         
@@ -167,7 +169,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
-            _ = notify_cancel(stopBroadcastToken)
+            notify_cancel(stopBroadcastToken)
             stopBroadcastToken = -1
         }
         
@@ -192,38 +194,18 @@ final class SampleHandler: RPBroadcastSampleHandler {
         _ sampleBuffer: CMSampleBuffer,
         with sampleBufferType: RPSampleBufferType
     ) {
-        NSLog("IOSMirror Extension: processSampleBuffer called, type: %d", sampleBufferType.rawValue)
-        
-        // Only process video buffers
-        guard sampleBufferType == .video else {
-            NSLog("IOSMirror Extension: non-video buffer, ignoring")
-            return
-        }
-        
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            NSLog("IOSMirror Extension: no pixel buffer, returning")
-            return
-        }
-        
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        
-        NSLog("IOSMirror Extension: processing frame \(width)x\(height)")
-        
-        // Setup encoder if needed
+        NSLog("IOSMirror Extension: processSampleBuffer type: %d", sampleBufferType.rawValue)
+        os_log("processSampleBuffer type: %{public}d", log: extLogger, type: .info, sampleBufferType.rawValue)
+        guard sampleBufferType == .video,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+        else { return }
+
         if compressionSession == nil {
-            NSLog("IOSMirror Extension: setting up encoder")
-            setupEncoder(width: Int32(width), height: Int32(height))
+            setupEncoder(width:  Int32(CVPixelBufferGetWidth(pixelBuffer)),
+                         height: Int32(CVPixelBufferGetHeight(pixelBuffer)))
         }
-        
-        // Encode the frame
-        if compressionSession != nil {
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            encodeFrame(pixelBuffer, pts: pts)
-            NSLog("IOSMirror Extension: frame encoded")
-        } else {
-            NSLog("IOSMirror Extension: ERROR - compressionSession is nil after setup")
-        }
+
+        encodeFrame(pixelBuffer, pts: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     }
 
     // MARK: - Setup
@@ -262,11 +244,11 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - HTTP Server (port 8080, serves to Chromecast directly)
 
     private func startHTTPServer(port: UInt16? = nil) -> Bool {
+        NSLog("IOSMirror Extension: startHTTPServer called on port \(targetPort)")
         let targetPort = port ?? 8080
         let portObj = NWEndpoint.Port(rawValue: targetPort) ?? httpPort
         
         // Use simple TCP without local endpoint reuse in extension
-        NSLog("IOSMirror Extension: startHTTPServer called on port \(targetPort)")
         let params = NWParameters.tcp
         
         do {
@@ -367,7 +349,6 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - VideoToolbox Encoder
 
     private func setupEncoder(width: Int32, height: Int32) {
-        NSLog("IOSMirror Extension: setupEncoder called with \(width)x\(height)")
         var session: VTCompressionSession?
         let refCon  = Unmanaged.passUnretained(self).toOpaque()
         let status  = VTCompressionSessionCreate(
