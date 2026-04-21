@@ -42,10 +42,12 @@ final class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         // Signal the host app immediately — before TCP even connects — so the
         // Cast session starts as soon as the countdown finishes.
+        NSLog("=== IOSMirror Extension: broadcastStarted CALLED ===")
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
             nil, nil, true)
+        NSLog("=== IOSMirror Extension: posted broadcastStarted, connecting to server ===")
         connectToHLSServer()
         // Encoder is set up lazily on the first video frame so we can use
         // the actual pixel buffer dimensions (UIScreen.main is unavailable
