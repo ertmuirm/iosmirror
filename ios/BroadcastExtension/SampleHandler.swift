@@ -2,25 +2,8 @@ import ReplayKit
 import VideoToolbox
 import Network
 import CoreMedia
-import Darwin
-import os.log
-import Foundation
 
-// Set up exception handler to catch crashes
-
-// Import notification functions from Darwin
-@_silgen_name("notify_register_dispatch") private func notify_register_dispatch(
-    _ name: UnsafePointer<CChar>,
-    _ out_token: UnsafeMutablePointer<Int32>,
-    _ queue: DispatchQueue,
-    _ handler: @escaping (Int32) -> Void
-) -> Int32
-
-@_silgen_name("notify_cancel") private func notify_cancel(_ token: Int32) -> Int32
-
-private let extLogger = OSLog(subsystem: "com.iosmirror.extension", category: "HTTPServer")
-
-// MARK: - VT encoder output callback (file-scope, C-compatible)
+// MARK: - C-compatible encoder output callback (must be outside the class)
 
 private func encoderOutputCallback(
     outputCallbackRefCon: UnsafeMutableRawPointer?,
@@ -33,335 +16,124 @@ private func encoderOutputCallback(
           status == noErr,
           let sampleBuffer
     else { return }
-    Unmanaged<SampleHandler>.fromOpaque(refCon)
-        .takeUnretainedValue()
-        .handleEncodedSample(sampleBuffer)
+    let handler = Unmanaged<SampleHandler>.fromOpaque(refCon).takeUnretainedValue()
+    handler.handleEncodedSample(sampleBuffer, flags: infoFlags)
 }
 
 // MARK: - SampleHandler
-//
-// Self-contained broadcast extension:
-//   • encodes screen frames to H.264 via VideoToolbox
-//   • packetizes to MPEG-TS with TSPacketizer
-//   • writes HLS segments to a temp directory
-//   • serves the live HLS playlist + segments on port 8080
-//
-// The main app only manages the Cast session; it never sees the video data.
 
+/// ReplayKit Broadcast Upload Extension entry point.
+///
+/// Flow:
+///   1. broadcastStarted  → connect to HLSStreamServer on 127.0.0.1:9090 → setup H.264 encoder
+///   2. processSampleBuffer → encode CVPixelBuffer → send H.264 Annex-B frames over TCP
+///   3. broadcastFinished → send stop control message → clean up
 final class SampleHandler: RPBroadcastSampleHandler {
 
-    // MARK: - Encoder
+    // MARK: - Properties
+
+    private var connection:         NWConnection?
     private var compressionSession: VTCompressionSession?
-
-    // MARK: - Stop notification
-    private var stopBroadcastToken: Int32 = -1
-
-    // MARK: - HLS pipeline
-    private var httpListener:     NWListener?
-    private var segmentDir:       URL!
-    private var packetizer      = TSPacketizer()
-    private var segmentData     = Data()
-    private var segmentStartPTS: Int64 = Int64.min   // uninitialised sentinel
-    private var segmentIndex    = 0
-    private var mediaSequence   = 0
-    private var segments:         [String] = []
-    private var localIP         = "127.0.0.1"
 
     private let queue = DispatchQueue(label: "com.iosmirror.extension", qos: .userInteractive)
 
-    private let httpPort:        NWEndpoint.Port = 8080
-    private let segmentDuration: Double          = 2.0
-    private let maxSegments                      = 5
-
     // MARK: - RPBroadcastSampleHandler
 
-    override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
-        NSLog("=== IOSMirror Extension: broadcastStarted CALLED with setupInfo: \(String(describing: setupInfo)) ===")
-        
-        // Setup directory first
-        NSLog("IOSMirror Extension: calling setupSegmentDir")
-        setupSegmentDir()
-        
-        // Detect IP
-        localIP = detectLocalIP() ?? "127.0.0.1"
-        
-        NSLog("IOSMirror Extension: setupSegmentDir done, localIP: %@", localIP)
-        
-        // Start HTTP server - continue even if HTTP fails so broadcast still works
-        NSLog("IOSMirror Extension: calling startHTTPServer")
-        
-        // Try primary port 8080 first
-        let httpStarted = startHTTPServer()
-        
-        if !httpStarted {
-            // Try alternate ports if 8080 fails
-            NSLog("IOSMirror Extension: trying alternate ports")
-            for altPort: UInt16 in [8081, 8082, 9080] {
-                if startHTTPServer(port: altPort) {
-                    NSLog("IOSMirror Extension: HTTP server started on alt port \(altPort)")
-                    break
-                }
-            }
-        }
-        
-        NSLog("IOSMirror Extension: HTTP server done, posting broadcastStarted notification")
-        
-        // Tell main app the broadcast is live so it can load stream on Cast.
-        // Use UserDefaults to communicate - app will check this
-        let sharedDefaults = UserDefaults(suiteName: "group.com.iosmirror")
-        sharedDefaults?.set(true, forKey: "broadcastDidStart")
-        sharedDefaults?.synchronize()
-        
+    override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        // Signal the host app immediately — before TCP even connects — so the
+        // Cast session starts as soon as the countdown finishes.
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
             nil, nil, true)
-        var stopTok: Int32 = -1
-        notify_register_dispatch(
-            "com.iosmirror.stopBroadcast", &stopTok, queue
-        ) { [weak self] _ in
-            os_log("Stop broadcast notification received", log: extLogger, type: .info)
-            self?.finishBroadcastWithUserStopped()
-        }
-        self.stopBroadcastToken = stopTok
-
-        // Tell the main app the broadcast is live so it can load the stream on Cast.
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
-            nil, nil, true)
+        connectToHLSServer()
+        // Encoder is set up lazily on the first video frame so we can use
+        // the actual pixel buffer dimensions (UIScreen.main is unavailable
+        // in a Broadcast Upload Extension process).
     }
 
-    override func broadcastPaused()  {}
-    override func broadcastResumed() {}
+    override func broadcastPaused() {
+        sendControl("pause")
+    }
+
+    override func broadcastResumed() {
+        sendControl("resume")
+    }
 
     override func broadcastFinished() {
-        NSLog("IOSMirror Extension: broadcastFinished CALLED")
-        
-        // CRITICAL: Always call finish to release the broadcast session
-        // This allows other apps to use screen recording
-        finishBroadcastWithUserStopped()
-        // Clean up stop notification token.
-        if stopBroadcastToken != -1 {
-            _ = notify_cancel(stopBroadcastToken)
-            stopBroadcastToken = -1
-        }
-        
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName("com.iosmirror.broadcastStopped" as CFString),
             nil, nil, true)
-
+        sendControl("stop")   // belt-and-suspenders via TCP
         compressionSession.map { VTCompressionSessionInvalidate($0) }
         compressionSession = nil
-        httpListener?.cancel()
-        httpListener = nil
-        
-        NSLog("IOSMirror Extension: broadcastFinished cleanup done")
-    }
-    
-    // Called when main app sends stopBroadcast notification.
-    private func finishBroadcastWithUserStopped() {
-        os_log("Finishing broadcast due to user stop", log: extLogger, type: .info)
-        
-        // Clean up stop notification token.
-        if stopBroadcastToken != -1 {
-            _ = notify_cancel(stopBroadcastToken)
-            stopBroadcastToken = -1
-        }
-        
-        // Post broadcast stopped notification.
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName("com.iosmirror.broadcastStopped" as CFString),
-            nil, nil, true)
-        
-        compressionSession.map { VTCompressionSessionInvalidate($0) }
-        compressionSession = nil
-        httpListener?.cancel()
-        httpListener = nil
-        
-        // This tells the system the broadcast ended.
-        // Use NSError with code 0 to indicate no error (success)
-        let noErr = NSError(domain: NSOSStatusErrorDomain, code: 0)
-        finishBroadcastWithError(noErr)
+        connection?.cancel()
+        connection = nil
     }
 
     override func processSampleBuffer(
         _ sampleBuffer: CMSampleBuffer,
         with sampleBufferType: RPSampleBufferType
     ) {
-        NSLog("IOSMirror Extension: processSampleBuffer type: %d", sampleBufferType.rawValue)
-        os_log("processSampleBuffer type: %{public}d", log: extLogger, type: .info, sampleBufferType.rawValue)
         guard sampleBufferType == .video,
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
         else { return }
 
+        // Set up encoder on first frame using actual buffer dimensions.
         if compressionSession == nil {
             setupEncoder(width:  Int32(CVPixelBufferGetWidth(pixelBuffer)),
                          height: Int32(CVPixelBufferGetHeight(pixelBuffer)))
         }
 
-        encodeFrame(pixelBuffer, pts: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        encodeFrame(pixelBuffer, pts: pts)
     }
 
-    // MARK: - Setup
+    // MARK: - Connection
 
-    private func setupSegmentDir() {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hls_ext", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
-            for f in files { try? FileManager.default.removeItem(at: dir.appendingPathComponent(f)) }
+    private func connectToHLSServer() {
+        let conn = NWConnection(host: "127.0.0.1", port: 9090, using: .tcp)
+        conn.stateUpdateHandler = { [weak self] state in
+            if case .failed = state { self?.scheduleReconnect() }
         }
-        segmentDir = dir
+        conn.start(queue: queue)
+        connection = conn
     }
 
-    private func detectLocalIP() -> String? {
-        var addr: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&addr) == 0 else { return nil }
-        defer { freeifaddrs(addr) }
-        var ptr = addr
-        while let p = ptr {
-            let sa = p.pointee.ifa_addr!
-            if sa.pointee.sa_family == UInt8(AF_INET) {
-                let name = String(cString: p.pointee.ifa_name)
-                if name == "en0" {
-                    var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                    getnameinfo(sa, socklen_t(sa.pointee.sa_len),
-                                &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
-                    return String(cString: host)
-                }
-            }
-            ptr = p.pointee.ifa_next
+    private func scheduleReconnect() {
+        queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.connectToHLSServer()
         }
-        return nil
-    }
-
-    // MARK: - HTTP Server (port 8080, serves to Chromecast directly)
-
-    private func startHTTPServer(port: UInt16? = nil) -> Bool {
-        let targetPort = port ?? 8080
-        let portObj = NWEndpoint.Port(rawValue: targetPort) ?? httpPort
-        NSLog("IOSMirror Extension: startHTTPServer called on port \(targetPort)")
-        
-        // Use simple TCP without local endpoint reuse in extension
-        let params = NWParameters.tcp
-        
-        do {
-            let listener = try NWListener(using: params, on: portObj)
-            httpListener = listener
-            
-            listener.newConnectionHandler = { [weak self] conn in
-                NSLog("IOSMirror Extension: new TCP connection")
-                conn.start(queue: self?.queue ?? .global())
-                self?.serveHTTP(conn)
-            }
-            
-            listener.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    NSLog("IOSMirror Extension: TCP listener ready")
-                case .failed(let err):
-                    NSLog("IOSMirror Extension: TCP listener failed: \(err)")
-                default:
-                    break
-                }
-            }
-            
-            listener.start(queue: queue)
-            NSLog("IOSMirror Extension: TCP listener started successfully on port \(targetPort)")
-            return true
-        } catch {
-            NSLog("IOSMirror Extension: TCP listener start failed: \(error)")
-            return false
-        }
-    }
-
-    private func serveHTTP(_ conn: NWConnection) {
-        os_log("TCP connected", log: extLogger, type: .info)
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { [weak self] data, _, _, _ in
-            guard let self, let data,
-                  let request = String(data: data, encoding: .utf8)
-            else { conn.cancel(); return }
-            self.respond(path: self.parsePath(from: request), conn: conn)
-        }
-    }
-
-    private func parsePath(from request: String) -> String {
-        guard let line = request.split(separator: "\n").first else { return "/" }
-        let parts = line.split(separator: " ")
-        return parts.count >= 2 ? String(parts[1]) : "/"
-    }
-
-    private func respond(path: String, conn: NWConnection) {
-        let name = (path as NSString).lastPathComponent
-        if name == "index.m3u8" {
-            let body = buildPlaylist().data(using: .utf8) ?? Data()
-            sendHTTP(body, contentType: "application/vnd.apple.mpegurl", conn: conn)
-        } else if name.hasSuffix(".ts") {
-            let file = segmentDir.appendingPathComponent(name)
-            if let body = try? Data(contentsOf: file) {
-                sendHTTP(body, contentType: "video/mp2t", conn: conn)
-            } else {
-                send404(conn)
-            }
-        } else {
-            send404(conn)
-        }
-    }
-
-    private func sendHTTP(_ body: Data, contentType: String, conn: NWConnection) {
-        let header = [
-            "HTTP/1.1 200 OK",
-            "Content-Type: \(contentType)",
-            "Content-Length: \(body.count)",
-            "Access-Control-Allow-Origin: *",
-            "Cache-Control: no-cache, no-store",
-            "Connection: close",
-            "", "",
-        ].joined(separator: "\r\n")
-        var response = header.data(using: .utf8)!
-        response.append(body)
-        conn.send(content: response, completion: .contentProcessed { _ in conn.cancel() })
-    }
-
-    private func send404(_ conn: NWConnection) {
-        let msg = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        conn.send(content: msg.data(using: .utf8), completion: .contentProcessed { _ in conn.cancel() })
-    }
-
-    private func buildPlaylist() -> String {
-        var m3u8  = "#EXTM3U\n"
-        m3u8     += "#EXT-X-VERSION:3\n"
-        m3u8     += "#EXT-X-TARGETDURATION:\(Int(segmentDuration) + 1)\n"
-        m3u8     += "#EXT-X-MEDIA-SEQUENCE:\(mediaSequence)\n"
-        for name in segments {
-            m3u8 += "#EXTINF:\(segmentDuration),\n"
-            m3u8 += "http://\(localIP):\(httpPort)/stream/\(name)\n"
-        }
-        return m3u8
     }
 
     // MARK: - VideoToolbox Encoder
 
     private func setupEncoder(width: Int32, height: Int32) {
         var session: VTCompressionSession?
-        let refCon  = Unmanaged.passUnretained(self).toOpaque()
-        let status  = VTCompressionSessionCreate(
-            allocator: nil, width: width, height: height,
-            codecType: kCMVideoCodecType_H264,
-            encoderSpecification: nil, imageBufferAttributes: nil,
-            compressedDataAllocator: nil,
-            outputCallback: encoderOutputCallback,
-            refcon: refCon, compressionSessionOut: &session
+        let refCon = Unmanaged.passUnretained(self).toOpaque()
+
+        let status = VTCompressionSessionCreate(
+            allocator:                nil,
+            width:                    width,
+            height:                   height,
+            codecType:                kCMVideoCodecType_H264,
+            encoderSpecification:     nil,
+            imageBufferAttributes:    nil,
+            compressedDataAllocator:  nil,
+            outputCallback:           encoderOutputCallback,
+            refcon:                   refCon,
+            compressionSessionOut:    &session
         )
+
         guard status == noErr, let session else {
-            finishBroadcastWithError(NSError(
-                domain: "IOSMirror", code: Int(status),
-                userInfo: [NSLocalizedDescriptionKey: "VTCompressionSession failed: \(status)"]))
+            finishBroadcastWithError(
+                NSError(domain: "IOSMirror", code: Int(status),
+                        userInfo: [NSLocalizedDescriptionKey: "Failed to create VTCompressionSession: \(status)"])
+            )
             return
         }
+
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime,                   value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering,        value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,                value: kVTProfileLevel_H264_High_AutoLevel)
@@ -369,96 +141,80 @@ final class SampleHandler: RPBroadcastSampleHandler {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: NSNumber(value: 2))
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate,           value: NSNumber(value: 30))
         VTCompressionSessionPrepareToEncodeFrames(session)
+
         compressionSession = session
     }
 
     private func encodeFrame(_ pixelBuffer: CVPixelBuffer, pts: CMTime) {
         guard let session = compressionSession else { return }
         VTCompressionSessionEncodeFrame(
-            session, imageBuffer: pixelBuffer,
-            presentationTimeStamp: pts, duration: .invalid,
-            frameProperties: nil, sourceFrameRefcon: nil, infoFlagsOut: nil
+            session,
+            imageBuffer:           pixelBuffer,
+            presentationTimeStamp: pts,
+            duration:              .invalid,
+            frameProperties:       nil,
+            sourceFrameRefcon:     nil,
+            infoFlagsOut:          nil
         )
     }
 
-    // MARK: - Encoded Frame Handler (called by C callback above)
+    // MARK: - Encoded Frame Handler (called from C callback above)
 
-    func handleEncodedSample(_ sampleBuffer: CMSampleBuffer) {
+    func handleEncodedSample(_ sampleBuffer: CMSampleBuffer, flags: VTEncodeInfoFlags) {
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
 
+        // Detect keyframe: absence of NotSync attachment means it IS a sync (key) frame
         let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
             as? [[CFString: Any]]
         let isKeyframe = attachments?.first?[kCMSampleAttachmentKey_NotSync] == nil
 
         var annexB = Data()
+
+        // Prepend SPS + PPS for keyframes so the receiver can decode
         if isKeyframe, let desc = CMSampleBufferGetFormatDescription(sampleBuffer) {
             annexB.append(extractParameterSets(from: desc))
         }
 
+        // CMBlockBuffer contains AVCC-format (length-prefixed) NALUs — convert to Annex-B
         let totalLength = CMBlockBufferGetDataLength(dataBuffer)
         var avccData = Data(count: totalLength)
-        _ = avccData.withUnsafeMutableBytes {
+        avccData.withUnsafeMutableBytes {
             CMBlockBufferCopyDataBytes(dataBuffer, atOffset: 0, dataLength: totalLength,
                                       destination: $0.baseAddress!)
         }
         annexB.append(avccToAnnexB(avccData))
 
-        let pts90k = Int64(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 90_000)
-        queue.async { self.handleVideoFrame(annexB, pts90k: pts90k, isKeyframe: isKeyframe) }
+        let pts    = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let ptsMs  = Int64(CMTimeGetSeconds(pts) * 1_000)
+        sendFrame(type: 0x01, ptsMs: ptsMs, payload: annexB)
     }
 
-    // MARK: - HLS Segmentation (runs on queue)
-
-    private func handleVideoFrame(_ annexB: Data, pts90k: Int64, isKeyframe: Bool) {
-        if segmentStartPTS == Int64.min {
-            guard isKeyframe else { return }
-            segmentStartPTS = pts90k
-            segmentData.append(packetizer.makeSegmentHeader())
-        }
-        let elapsed = Double(pts90k - segmentStartPTS) / 90_000.0
-        if elapsed >= segmentDuration && isKeyframe {
-            flushSegment()
-            segmentStartPTS = pts90k
-            segmentData.append(packetizer.makeSegmentHeader())
-        }
-        segmentData.append(packetizer.makeVideoPackets(annexB, pts: pts90k, isKeyframe: isKeyframe))
-    }
-
-    private func flushSegment() {
-        let name = "seg\(segmentIndex).ts"
-        try? segmentData.write(to: segmentDir.appendingPathComponent(name), options: .atomic)
-        segments.append(name)
-        segmentIndex += 1
-        segmentData = Data()
-        if segments.count > maxSegments {
-            let old = segments.removeFirst()
-            try? FileManager.default.removeItem(at: segmentDir.appendingPathComponent(old))
-            mediaSequence += 1
-        }
-    }
-
-    // MARK: - Format Helpers
+    // MARK: - Format Description → SPS/PPS (Annex-B)
 
     private func extractParameterSets(from desc: CMFormatDescription) -> Data {
-        var result = Data()
+        var result   = Data()
         var setCount = 0
         CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
             desc, parameterSetIndex: 0,
             parameterSetPointerOut: nil, parameterSetSizeOut: nil,
-            parameterSetCountOut: &setCount, nalUnitHeaderLengthOut: nil)
+            parameterSetCountOut: &setCount, nalUnitHeaderLengthOut: nil
+        )
         for i in 0..<setCount {
-            var ptr: UnsafePointer<UInt8>?
-            var size = 0
+            var ptr:  UnsafePointer<UInt8>?
+            var size: Int = 0
             let st = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
                 desc, parameterSetIndex: i,
                 parameterSetPointerOut: &ptr, parameterSetSizeOut: &size,
-                parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil)
+                parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
+            )
             guard st == noErr, let ptr else { continue }
             result.append(contentsOf: [0, 0, 0, 1])
             result.append(UnsafeBufferPointer(start: ptr, count: size))
         }
         return result
     }
+
+    // MARK: - AVCC → Annex-B
 
     private func avccToAnnexB(_ data: Data) -> Data {
         var result = Data()
@@ -475,5 +231,28 @@ final class SampleHandler: RPBroadcastSampleHandler {
             offset = end
         }
         return result
+    }
+
+    // MARK: - Wire Protocol
+
+    // Header layout (13 bytes):
+    //   [0]     type   : UInt8  — 0x01 = video frame, 0xFF = control
+    //   [1..8]  pts_ms : Int64  — little-endian milliseconds
+    //   [9..12] length : UInt32 — little-endian payload byte count
+
+    private func sendFrame(type: UInt8, ptsMs: Int64, payload: Data) {
+        guard let conn = connection else { return }
+        var header = Data(count: 13)
+        header[0] = type
+        var pts = ptsMs
+        var len = UInt32(payload.count)
+        withUnsafeBytes(of: &pts) { header.replaceSubrange(1..<9,  with: $0) }
+        withUnsafeBytes(of: &len) { header.replaceSubrange(9..<13, with: $0) }
+        conn.send(content: header + payload, completion: .idempotent)
+    }
+
+    private func sendControl(_ message: String) {
+        let payload = message.data(using: .utf8) ?? Data()
+        sendFrame(type: 0xFF, ptsMs: 0, payload: payload)
     }
 }
