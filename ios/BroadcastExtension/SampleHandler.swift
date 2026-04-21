@@ -6,6 +6,9 @@ import Darwin
 import os.log
 import Foundation
 
+/// TSPacketizer for creating MPEG-TS segments from H.264 NAL units
+import TSPacketizer
+
 // Set up exception handler to catch crashes
 
 // Import notification functions from Darwin
