@@ -90,9 +90,23 @@ final class SampleHandler: RPBroadcastSampleHandler {
         
         NSLog("IOSMirror Extension: setupSegmentDir done, localIP: %@", localIP)
         
-        // Start HTTP server
+        // Start HTTP server - continue even if HTTP fails so broadcast still works
         NSLog("IOSMirror Extension: calling startHTTPServer")
-        startHTTPServer()
+        
+        // Try primary port 8080 first
+        var httpStarted = startHTTPServer()
+        
+        if !httpStarted {
+            // Try alternate ports if 8080 fails
+            NSLog("IOSMirror Extension: trying alternate ports")
+            for altPort: UInt16 in [8081, 8082, 9080] {
+                if startHTTPServer(port: altPort) {
+                    NSLog("IOSMirror Extension: HTTP server started on alt port \(altPort)")
+                    break
+                }
+            }
+        }
+        
         NSLog("IOSMirror Extension: HTTP server done, posting broadcastStarted notification")
         
         // Tell main app the broadcast is live so it can load stream on Cast.
@@ -229,8 +243,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: - HTTP Server (port 8080, serves to Chromecast directly)
 
-    private func startHTTPServer() {
+    private func startHTTPServer(port: UInt16? = nil) -> Bool {
         NSLog("IOSMirror Extension: startHTTPServer called on port \(self.httpPort.rawValue)")
+        let targetPort = port ?? 8080
         
         // Use simple TCP without local endpoint reuse in extension
         let params = NWParameters.tcp
@@ -257,9 +272,11 @@ final class SampleHandler: RPBroadcastSampleHandler {
             }
             
             listener.start(queue: queue)
-            NSLog("IOSMirror Extension: TCP listener started successfully")
+            NSLog("IOSMirror Extension: TCP listener started successfully on port \(targetPort)")
+            return true
         } catch {
             NSLog("IOSMirror Extension: TCP listener start failed: \(error)")
+            return false
         }
     }
 
