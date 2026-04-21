@@ -3,17 +3,6 @@ import GoogleCast
 import ReplayKit
 import UIKit
 
-// Import Darwin notification functions for communicating with broadcast extension.
-// These are used to receive broadcastStarted, firstSegmentReady, and broadcastStopped signals.
-@_silgen_name("notify_register_dispatch") private func notify_register_dispatch(
-    _ name: UnsafePointer<CChar>,
-    _ out_token: UnsafeMutablePointer<Int32>,
-    _ queue: DispatchQueue,
-    _ handler: @escaping (Int32) -> Void
-) -> Int32
-
-@_silgen_name("notify_cancel") private func notify_cancel(_ token: Int32) -> Int32
-
 /// React Native native module that bridges the JS layer to the Google Cast SDK
 /// and the HLS stream server.
 /// Note: Extension now runs its own HTTP server and provides the stream URL
