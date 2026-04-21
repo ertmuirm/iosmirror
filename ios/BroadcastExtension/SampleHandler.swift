@@ -81,6 +81,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         // Setup directory first
         NSLog("IOSMirror Extension: calling setupSegmentDir")
         setupSegmentDir()
+        NSLog("IOSMirror Extension: setupSegmentDir completed")
         
         // Detect IP
         localIP = detectLocalIP() ?? "127.0.0.1"
@@ -191,18 +192,38 @@ final class SampleHandler: RPBroadcastSampleHandler {
         _ sampleBuffer: CMSampleBuffer,
         with sampleBufferType: RPSampleBufferType
     ) {
-        NSLog("IOSMirror Extension: processSampleBuffer type: %d", sampleBufferType.rawValue)
-        os_log("processSampleBuffer type: %{public}d", log: extLogger, type: .info, sampleBufferType.rawValue)
-        guard sampleBufferType == .video,
-              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
-        else { return }
-
-        if compressionSession == nil {
-            setupEncoder(width:  Int32(CVPixelBufferGetWidth(pixelBuffer)),
-                         height: Int32(CVPixelBufferGetHeight(pixelBuffer)))
+        NSLog("IOSMirror Extension: processSampleBuffer called, type: %d", sampleBufferType.rawValue)
+        
+        // Only process video buffers
+        guard sampleBufferType == .video else {
+            NSLog("IOSMirror Extension: non-video buffer, ignoring")
+            return
         }
-
-        encodeFrame(pixelBuffer, pts: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            NSLog("IOSMirror Extension: no pixel buffer, returning")
+            return
+        }
+        
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        
+        NSLog("IOSMirror Extension: processing frame \(width)x\(height)")
+        
+        // Setup encoder if needed
+        if compressionSession == nil {
+            NSLog("IOSMirror Extension: setting up encoder")
+            setupEncoder(width: Int32(width), height: Int32(height))
+        }
+        
+        // Encode the frame
+        if compressionSession != nil {
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            encodeFrame(pixelBuffer, pts: pts)
+            NSLog("IOSMirror Extension: frame encoded")
+        } else {
+            NSLog("IOSMirror Extension: ERROR - compressionSession is nil after setup")
+        }
     }
 
     // MARK: - Setup
@@ -270,7 +291,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
             }
             
             listener.start(queue: queue)
-            NSLog("IOSMirror Extension: TCP listener started successfully on port \\(targetPort)")
+            NSLog("IOSMirror Extension: TCP listener started successfully on port \(targetPort)")
             return true
         } catch {
             NSLog("IOSMirror Extension: TCP listener start failed: \(error)")
@@ -346,6 +367,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - VideoToolbox Encoder
 
     private func setupEncoder(width: Int32, height: Int32) {
+        NSLog("IOSMirror Extension: setupEncoder called with \(width)x\(height)")
         var session: VTCompressionSession?
         let refCon  = Unmanaged.passUnretained(self).toOpaque()
         let status  = VTCompressionSessionCreate(
