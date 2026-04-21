@@ -7,12 +7,9 @@ import os.log
 import Foundation
 
 // Set up exception handler to catch crashes
-NSSetUncaughtExceptionHandler { exception in
-    NSLog("IOSMirror Extension: CRASH: \(exception.name) \(exception.reason ?? "no reason")")
-}
 
 // Import notification functions from Darwin
-@_silgen_name("notify_register_dispatch") private func notify_register_dispatch(
+@_silgen_name("notify_register_dispatch") private func _ = notify_register_dispatch(
     _ name: UnsafePointer<CChar>,
     _ out_token: UnsafeMutablePointer<Int32>,
     _ queue: DispatchQueue,
@@ -94,7 +91,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         NSLog("IOSMirror Extension: calling startHTTPServer")
         
         // Try primary port 8080 first
-        var httpStarted = startHTTPServer()
+        let httpStarted = startHTTPServer()
         
         if !httpStarted {
             // Try alternate ports if 8080 fails
@@ -120,7 +117,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
             CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
             nil, nil, true)
         var stopTok: Int32 = -1
-        notify_register_dispatch(
+        _ = notify_register_dispatch(
             "com.iosmirror.stopBroadcast", &stopTok, queue
         ) { [weak self] _ in
             os_log("Stop broadcast notification received", log: extLogger, type: .info)
@@ -146,7 +143,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         finishBroadcastWithUserStopped()
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
-            notify_cancel(stopBroadcastToken)
+            _ = notify_cancel(stopBroadcastToken)
             stopBroadcastToken = -1
         }
         
@@ -169,7 +166,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
-            notify_cancel(stopBroadcastToken)
+            _ = notify_cancel(stopBroadcastToken)
             stopBroadcastToken = -1
         }
         
@@ -244,9 +241,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - HTTP Server (port 8080, serves to Chromecast directly)
 
     private func startHTTPServer(port: UInt16? = nil) -> Bool {
-        NSLog("IOSMirror Extension: startHTTPServer called on port \(targetPort)")
         let targetPort = port ?? 8080
         let portObj = NWEndpoint.Port(rawValue: targetPort) ?? httpPort
+        NSLog("IOSMirror Extension: startHTTPServer called on port \(targetPort)")
         
         // Use simple TCP without local endpoint reuse in extension
         let params = NWParameters.tcp
