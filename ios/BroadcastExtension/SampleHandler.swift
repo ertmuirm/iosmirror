@@ -9,7 +9,7 @@ import Foundation
 // Set up exception handler to catch crashes
 
 // Import notification functions from Darwin
-@_silgen_name("notify_register_dispatch") private func _ = notify_register_dispatch(
+@_silgen_name("notify_register_dispatch") private func notify_register_dispatch(
     _ name: UnsafePointer<CChar>,
     _ out_token: UnsafeMutablePointer<Int32>,
     _ queue: DispatchQueue,
@@ -117,7 +117,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
             CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
             nil, nil, true)
         var stopTok: Int32 = -1
-        _ = notify_register_dispatch(
+        notify_register_dispatch(
             "com.iosmirror.stopBroadcast", &stopTok, queue
         ) { [weak self] _ in
             os_log("Stop broadcast notification received", log: extLogger, type: .info)
