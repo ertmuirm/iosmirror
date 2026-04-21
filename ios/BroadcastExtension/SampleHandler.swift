@@ -126,6 +126,10 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     override func broadcastFinished() {
         NSLog("IOSMirror Extension: broadcastFinished CALLED")
+        
+        // CRITICAL: Always call finish to release the broadcast session
+        // This allows other apps to use screen recording
+        finishBroadcastWithUserStopped()
         // Clean up stop notification token.
         if stopBroadcastToken != -1 {
             notify_cancel(stopBroadcastToken)
@@ -141,6 +145,8 @@ final class SampleHandler: RPBroadcastSampleHandler {
         compressionSession = nil
         httpListener?.cancel()
         httpListener = nil
+        
+        NSLog("IOSMirror Extension: broadcastFinished cleanup done")
     }
     
     // Called when main app sends stopBroadcast notification.
