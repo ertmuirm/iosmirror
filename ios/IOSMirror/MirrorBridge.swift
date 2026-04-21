@@ -13,6 +13,7 @@ final class MirrorBridge: RCTEventEmitter {
 
     // Token for Darwin notify registration; -1 = not registered.
     private var broadcastStoppedToken: Int32 = -1
+    private var broadcastStartedToken: Int32 = -1
 
     // MARK: - RCTEventEmitter
 
@@ -123,8 +124,28 @@ final class MirrorBridge: RCTEventEmitter {
             // sessionManager:didStart: (Cast connects after broadcast starts).
             GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
             self.triggerBroadcastPicker()
+            
+            // Also register for broadcastStarted in case we get killed
+            self.registerBroadcastStartedHandler()
+            
             resolve(nil)
         }
+    }
+
+    // Handle broadcastStarted from extension - restart server if we were killed
+    private func registerBroadcastStartedHandler() {
+        var startedTok: Int32 = -1
+        notify_register_dispatch(
+            "com.iosmirror.broadcastStarted", &startedTok, .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.emit("onDebug", body: "broadcastStarted_from_extension")
+            // Restart HLSStreamServer if needed (app may have been killed)
+            if HLSStreamServer.shared.segmentCount == 0 {
+                HLSStreamServer.shared.start()
+            }
+        }
+        self.broadcastStartedToken = startedTok
     }
 
     @objc func stopMirror(
@@ -147,6 +168,10 @@ final class MirrorBridge: RCTEventEmitter {
         if broadcastStoppedToken != -1 {
             notify_cancel(broadcastStoppedToken)
             broadcastStoppedToken = -1
+        }
+        if broadcastStartedToken != -1 {
+            notify_cancel(broadcastStartedToken)
+            broadcastStartedToken = -1
         }
     }
 
