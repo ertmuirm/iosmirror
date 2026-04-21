@@ -196,130 +196,34 @@ override func stopObserving()  {
 
     private func triggerBroadcastPicker() {
         self.emit("onDebug", body: "triggerBroadcastPicker_called")
-        os_log("Triggering system broadcast picker", log: logger, type: .info)
-        guard let windowScene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive }),
-              let rootVC = windowScene.windows.first?.rootViewController
-        else { 
-            self.emit("onDebug", body: "failed_no_root_view_controller")
-            os_log("Failed to find root view controller", log: logger, type: .error)
-            return 
-        }
+        os_log("Triggering broadcast picker via RPBroadcastActivityController", log: logger, type: .info)
 
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-        let extID = installedBroadcastExtensionBundleID() ?? "NOT_FOUND"
-        self.emit("onDebug", body: "extension_bundle_id:\(extID)")
-        
-        // Verify extension exists before creating picker
-        guard extID != "NOT_FOUND" else {
-            self.emit("onDebug", body: "ERROR_extension_not_found")
-            os_log("Extension not found!", log: logger, type: .error)
-            return
-        }
-        
-        picker.preferredExtension = extID
-        picker.showsMicrophoneButton = false
-        
-        // Make picker visible for user to tap manually if needed
-        picker.backgroundColor = .clear
-        picker.alpha = 0.01  // Nearly invisible but still tappable
-        
-        rootVC.view.addSubview(picker)
-        self.emit("onDebug", body: "picker_added_to_view")
-        
-        os_log("Picker added to view, waiting for tap...", log: logger, type: .info)
+        // Use RPBroadcastActivityController - the proper API for iOS 14+
+        // This presents the system broadcast picker modally
+        RPBroadcastActivityController.presentBroadcastActivityViewController(
+            from: nil,  // nil = use root view controller
+            delegate: self
+        )
 
-        // Add delay to let picker create subviews
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let buttons = picker.subviews.compactMap { $0 as? UIButton }
-            self.emit("onDebug", body: "picker_subviews:\(buttons.count)")
-            os_log("Picker subviews: %{public}d, trying button tap", log: logger, type: .info, buttons.count)
-            
-            // Try sendActions - the standard UIKit way
-            if let button = buttons.first {
-                os_log("Trying sendActions tap", log: logger, type: .info)
-                self.emit("onDebug", body: "trying_sendActions")
-                button.sendActions(for: .touchUpInside)
-                self.emit("onDebug", body: "sendActions_done")
-            } else {
-                // No button found - log all subviews for debugging
-                self.emit("onDebug", body: "no_button_all_subviews:\(picker.subviews.count)")
-                os_log("No button. All subviews: %{public}d", log: logger, type: .error, picker.subviews.count)
-            }
-            
-            // Remove picker after delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                picker.removeFromSuperview()
-                self.emit("onDebug", body: "picker_removed")
-            }
-        }
-        
-        self.emit("onDebug", body: "triggerPicker_function_end")
+        self.emit("onDebug", body: "presentBroadcastActivity_called")
     }
 }
 
-// MARK: - GCKSessionManagerListener
+// MARK: - RPBroadcastActivityControllerDelegate
+extension MirrorBridge: RPBroadcastActivityControllerDelegate {
+    func broadcastActivityController(_ broadcastActivityController: RPBroadcastActivityController,
+                                      didFinishWith broadcastController: RPBroadcastController?) {
+        os_log("Broadcast activity controller finished", log: logger, type: .info)
+        self.emit("onDebug", body: "broadcastActivityController_finished")
 
-extension MirrorBridge: GCKSessionManagerListener {
-
-    func sessionManager(
-        _ sessionManager: GCKSessionManager,
-        didStart session: GCKCastSession
-    ) {
-        os_log("Cast session started", log: logger, type: .info)
-        emit("onDebug", body: "cast_connected")
-        // Store session for when broadcast starts - don't load stream yet.
-        // The stream will be loaded after the broadcast extension starts and its HTTP server is ready.
-        activeCastSession = session
-        emit("onCastStateChanged", body: ["state": "mirroring"])
-    }
-
-    func sessionManager(
-        _ sessionManager: GCKSessionManager,
-        didEnd session: GCKCastSession,
-        withError error: Error?
-    ) {
-        os_log("Cast session ended: %{public}s", log: logger, type: .info, error?.localizedDescription ?? "no error")
-        activeCastSession = nil
-        emit("onCastStateChanged", body: ["state": "idle"])
-    }
-
-    func sessionManager(
-        _ sessionManager: GCKSessionManager,
-        didFailToStart session: GCKCastSession,
-        withError error: Error
-    ) {
-        os_log("Cast session failed to start: %{public}s", log: logger, type: .error, error.localizedDescription)
-        cancelBroadcastNotifications()
-        emit("onCastStateChanged", body: ["state": "idle"])
-        emit("onDebug", body: "cast_failed:\(error.localizedDescription)")
-    }
-}
-
-// MARK: - GCKDiscoveryManagerListener
-
-extension MirrorBridge: GCKDiscoveryManagerListener {
-
-    func didUpdateDeviceList() {
-        let dm = GCKCastContext.sharedInstance().discoveryManager
-        var list: [[String: String]] = []
-        for i in 0..<dm.deviceCount {
-            let d = dm.device(at: i)
-            list.append([
-                "deviceId":  d.deviceID,
-                "name":      d.friendlyName ?? d.deviceID,
-                "modelName": d.modelName    ?? "Chromecast",
-            ])
+        if let controller = broadcastController {
+            // Broadcast was started successfully
+            os_log("Broadcast started with controller", log: logger, type: .info)
+            self.emit("onDebug", body: "broadcast_started")
+        } else {
+            // User cancelled
+            os_log("Broadcast was cancelled", log: logger, type: .info)
+            self.emit("onDebug", body: "broadcast_cancelled")
         }
-        os_log("Device list updated: %d devices", log: logger, type: .info, list.count)
-        emit("onDevicesChanged", body: list)
-    }
-
-    func didHaveDiscoveryRequest() {}
-
-    func discoveryManagerDidStopDiscovery(_ discoveryManager: GCKDiscoveryManager) {
-        os_log("Discovery stopped", log: logger, type: .info)
-        emit("onScanComplete", body: NSNull())
     }
 }
