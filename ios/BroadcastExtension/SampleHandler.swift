@@ -230,15 +230,37 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - HTTP Server (port 8080, serves to Chromecast directly)
 
     private func startHTTPServer() {
+        NSLog("IOSMirror Extension: startHTTPServer called on port \(self.httpPort.rawValue)")
+        
+        // Use simple TCP without local endpoint reuse in extension
         let params = NWParameters.tcp
-        params.allowLocalEndpointReuse = true
-        guard let listener = try? NWListener(using: params, on: httpPort) else { return }
-        httpListener = listener
-        listener.newConnectionHandler = { [weak self] conn in
-            conn.start(queue: self?.queue ?? .global())
-            self?.serveHTTP(conn)
+        
+        do {
+            let listener = try NWListener(using: params, on: httpPort)
+            httpListener = listener
+            
+            listener.newConnectionHandler = { [weak self] conn in
+                NSLog("IOSMirror Extension: new TCP connection")
+                conn.start(queue: self?.queue ?? .global())
+                self?.serveHTTP(conn)
+            }
+            
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    NSLog("IOSMirror Extension: TCP listener ready")
+                case .failed(let err):
+                    NSLog("IOSMirror Extension: TCP listener failed: \(err)")
+                default:
+                    break
+                }
+            }
+            
+            listener.start(queue: queue)
+            NSLog("IOSMirror Extension: TCP listener started successfully")
+        } catch {
+            NSLog("IOSMirror Extension: TCP listener start failed: \(error)")
         }
-        listener.start(queue: queue)
     }
 
     private func serveHTTP(_ conn: NWConnection) {
