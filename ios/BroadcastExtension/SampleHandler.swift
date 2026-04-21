@@ -77,11 +77,6 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
         NSLog("=== IOSMirror Extension: broadcastStarted CALLED with setupInfo: \(String(describing: setupInfo)) ===")
-
-        // CRITICAL: Signal broadcast start to the system (success = noErr)
-        let noErr = NSError(domain: NSOSStatusErrorDomain, code: 0)
-        finishBroadcastWithError(noErr)
-
         
         // Setup directory first
         NSLog("IOSMirror Extension: calling setupSegmentDir")
@@ -246,14 +241,15 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - HTTP Server (port 8080, serves to Chromecast directly)
 
     private func startHTTPServer(port: UInt16? = nil) -> Bool {
-        NSLog("IOSMirror Extension: startHTTPServer called on port \(self.httpPort.rawValue)")
+        NSLog("IOSMirror Extension: startHTTPServer called on port \(targetPort)")
         let targetPort = port ?? 8080
+        let portObj = NWEndpoint.Port(rawValue: targetPort) ?? httpPort
         
         // Use simple TCP without local endpoint reuse in extension
         let params = NWParameters.tcp
         
         do {
-            let listener = try NWListener(using: params, on: httpPort)
+            let listener = try NWListener(using: params, on: portObj)
             httpListener = listener
             
             listener.newConnectionHandler = { [weak self] conn in
