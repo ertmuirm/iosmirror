@@ -196,34 +196,52 @@ override func stopObserving()  {
 
     private func triggerBroadcastPicker() {
         self.emit("onDebug", body: "triggerBroadcastPicker_called")
-        os_log("Triggering broadcast picker via RPBroadcastActivityController", log: logger, type: .info)
-
-        // Use RPBroadcastActivityController - the proper API for iOS 14+
-        // This presents the system broadcast picker modally
-        RPBroadcastActivityController.presentBroadcastActivityViewController(
-            from: nil,  // nil = use root view controller
-            delegate: self
-        )
-
-        self.emit("onDebug", body: "presentBroadcastActivity_called")
-    }
-}
-
-// MARK: - RPBroadcastActivityControllerDelegate
-extension MirrorBridge: RPBroadcastActivityControllerDelegate {
-    func broadcastActivityController(_ broadcastActivityController: RPBroadcastActivityController,
-                                      didFinishWith broadcastController: RPBroadcastController?) {
-        os_log("Broadcast activity controller finished", log: logger, type: .info)
-        self.emit("onDebug", body: "broadcastActivityController_finished")
-
-        if let controller = broadcastController {
-            // Broadcast was started successfully
-            os_log("Broadcast started with controller", log: logger, type: .info)
-            self.emit("onDebug", body: "broadcast_started")
-        } else {
-            // User cancelled
-            os_log("Broadcast was cancelled", log: logger, type: .info)
-            self.emit("onDebug", body: "broadcast_cancelled")
+        os_log("Triggering system broadcast picker", log: logger, type: .info)
+        
+        guard let windowScene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }),
+              let rootVC = windowScene.windows.first?.rootViewController
+        else {
+            self.emit("onDebug", body: "failed_no_root_vc")
+            os_log("Failed to find root VC", log: logger, type: .error)
+            return
         }
+
+        // Create broadcast picker with correct frame
+        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        
+        // Set the extension ID
+        if let extID = installedBroadcastExtensionBundleID() {
+            picker.preferredExtension = extID
+            self.emit("onDebug", body: "extension_set: \(extID)")
+        } else {
+            self.emit("onDebug", body: "extension_not_found")
+            return
+        }
+        
+        picker.showsMicrophoneButton = false
+        picker.backgroundColor = .clear
+        
+        // Add to view hierarchy and present
+        rootVC.view.addSubview(picker)
+        self.emit("onDebug", body: "picker_added")
+        
+        // Programmatically trigger the tap
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if let button = picker.subviews.first(where: { $0 is UIButton }) as? UIButton {
+                button.sendActions(for: .touchUpInside)
+                self.emit("onDebug", body: "button_tapped")
+            } else {
+                self.emit("onDebug", body: "no_button")
+            }
+        }
+        
+        // Clean up after delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            picker.removeFromSuperview()
+            self.emit("onDebug", body: "picker_removed")
+        }
+        
+        self.emit("onDebug", body: "triggerPicker_end")
     }
-}
