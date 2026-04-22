@@ -1,6 +1,8 @@
 import UIKit
 import GoogleCast
 import React_RCTAppDelegate
+import AVFoundation
+import BackgroundTasks
 
 @main
 final class AppDelegate: RCTAppDelegate {
@@ -13,8 +15,53 @@ final class AppDelegate: RCTAppDelegate {
         initialProps = [:]
 
         setupGoogleCast()
+        
+        // Setup audio session for background operation
+        setupAudioSession()
+        
+        // Register background tasks
+        registerBackgroundTasks()
 
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    }
+    
+    private func setupAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            try audioSession.setActive(true)
+        } catch {
+            print("Failed to setup audio session: \(error)")
+        }
+    }
+    
+    private func registerBackgroundTasks() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.iosmirror.refresh", using: nil) { task in
+            self.handleAppRefresh(task: task as! BGAppRefreshTask)
+        }
+    }
+    
+    private func handleAppRefresh(task: BGAppRefreshTask) {
+        // Schedule next refresh
+        scheduleAppRefresh()
+        
+        task.expirationHandler = {
+            task.setTaskCompleted(success: false)
+        }
+        
+        // Keep streaming alive
+        task.setTaskCompleted(success: true)
+    }
+    
+    func scheduleAppRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: "com.iosmirror.refresh")
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // 15 minutes
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            print("Could not schedule app refresh: \(error)")
+        }
     }
 
     override func sourceURL(for bridge: RCTBridge!) -> URL! {

@@ -123,15 +123,39 @@ final class MirrorBridge: RCTEventEmitter {
             // sessionManager:didStart: (Cast connects after broadcast starts).
             GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
             self.triggerBroadcastPicker()
+            
+            // Request extended background execution time
+            self.requestBackgroundTime()
+            
             resolve(nil)
         }
     }
+    
+    private func requestBackgroundTime() {
+        var taskID: UIBackgroundTaskIdentifier = .invalid
+        taskID = UIApplication.shared.beginBackgroundTask(withName: "Streaming") {
+            // Expiration handler - end the task
+            UIApplication.shared.endBackgroundTask(taskID)
+            taskID = .invalid
+        }
+        
+        // Store task ID to end later (reuse same property)
+        backgroundTaskID = taskID
+    }
+    
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     @objc func stopMirror(
         _ resolve: @escaping RCTPromiseResolveBlock,
         reject _: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
+            // End background task
+            if self.backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(self.backgroundTaskID)
+                self.backgroundTaskID = .invalid
+            }
+            
             self.cancelBroadcastNotifications()
             HLSStreamServer.shared.onBroadcastStopped  = nil
             HLSStreamServer.shared.onFirstSegmentReady = nil
