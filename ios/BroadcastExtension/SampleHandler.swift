@@ -2,6 +2,7 @@ import ReplayKit
 import VideoToolbox
 import Network
 import CoreMedia
+import os.log
 
 private var extLogger: OSLog?
 private func extLog(_ msg: String) {
