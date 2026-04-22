@@ -3,6 +3,25 @@ import VideoToolbox
 import Network
 import CoreMedia
 
+private var extLogger: OSLog?
+private func extLog(_ msg: String) {
+    if extLogger == nil {
+        extLogger = OSLog(subsystem: "com.iosmirror.extension", category: "main")
+    }
+    os_log("%{public}@", log: extLogger!, type: .default, msg)
+    // Write to app group container
+    if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.iosmirror") {
+        let logFile = containerURL.appendingPathComponent("ext.log")
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(msg)\n"
+        if let existing = try? String(contentsOf: logFile, encoding: .utf8) {
+            try? (existing + line).write(to: logFile, atomically: true, encoding: .utf8)
+        } else {
+            try? line.write(to: logFile, atomically: true, encoding: .utf8)
+        }
+    }
+}
+
 // MARK: - C-compatible encoder output callback (must be outside the class)
 
 private func encoderOutputCallback(
@@ -40,12 +59,15 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - RPBroadcastSampleHandler
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        extLog("broadcastStarted CALLED")
+        
         // Signal the host app immediately — before TCP even connects — so the
         // Cast session starts as soon as the countdown finishes.
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName("com.iosmirror.broadcastStarted" as CFString),
             nil, nil, true)
+        extLog("calling connectToHLSServer")
         connectToHLSServer()
         // Encoder is set up lazily on the first video frame so we can use
         // the actual pixel buffer dimensions (UIScreen.main is unavailable
@@ -93,16 +115,28 @@ final class SampleHandler: RPBroadcastSampleHandler {
     // MARK: - Connection
 
     private func connectToHLSServer() {
+        extLog("connectToHLSServer: starting TCP to 127.0.0.1:9090")
         let conn = NWConnection(host: "127.0.0.1", port: 9090, using: .tcp)
         conn.stateUpdateHandler = { [weak self] state in
-            if case .failed = state { self?.scheduleReconnect() }
+            extLog("TCP state: \(String(describing: state))")
+            if case .ready = state {
+                extLog("TCP CONNECTED!")
+            }
+            if case .failed(let err) = state {
+                extLog("TCP FAILED: \(err)")
+                self?.scheduleReconnect()
+            }
+            if case .cancelled = state {
+                extLog("TCP cancelled")
+            }
         }
         conn.start(queue: queue)
         connection = conn
     }
 
     private func scheduleReconnect() {
-        queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+        extLog("scheduleReconnect: retrying in 0.5s")
+        queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.connectToHLSServer()
         }
     }
