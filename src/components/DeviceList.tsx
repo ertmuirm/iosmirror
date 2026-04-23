@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   rowSelected: {
-    borderColor: '#19FFA3',
+    borderColor: '#808080',
   },
   info: {
     flex: 1,
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#19FFA3',
+    backgroundColor: '#808080',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 10,
