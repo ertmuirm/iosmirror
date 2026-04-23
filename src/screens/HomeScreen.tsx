@@ -6,7 +6,6 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  ScrollView,
 } from 'react-native';
 import DeviceList from '../components/DeviceList';
 import { useMirrorBridge } from '../hooks/useMirrorBridge';
@@ -17,7 +16,6 @@ export default function HomeScreen(): React.JSX.Element {
     scanning,
     castState,
     selectedDevice,
-    debugLog,
     selectDevice,
     startMirror,
     stopMirror,
@@ -74,16 +72,6 @@ export default function HomeScreen(): React.JSX.Element {
           <Text style={styles.badgeText}>Mirroring to {selectedDevice.name}</Text>
         </View>
       )}
-
-      {/* Debug log — always visible so "no events" is itself diagnostic */}
-      <ScrollView style={styles.debugBox} nestedScrollEnabled>
-        {debugLog.length === 0
-          ? <Text style={styles.debugText}>debug: waiting…</Text>
-          : debugLog.map((msg, i) => (
-              <Text key={i} style={styles.debugText}>{msg}</Text>
-            ))
-        }
-      </ScrollView>
 
       {/* Start/stop button */}
       <TouchableOpacity
@@ -166,18 +154,5 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     letterSpacing: 0.2,
-  },
-  debugBox: {
-    backgroundColor: '#111',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 14,
-    maxHeight: 100,
-  },
-  debugText: {
-    color: '#808080',
-    fontSize: 11,
-    fontFamily: 'Menlo',
-    lineHeight: 16,
   },
 });
