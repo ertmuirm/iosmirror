@@ -192,13 +192,38 @@ final class MirrorBridge: RCTEventEmitter {
         emit("onDebug", body: "load_stream_called:\(url)")
     }
 
+    /// Finds a third-party broadcast extension with the name "Screen Mirroring".
     private func installedBroadcastExtensionBundleID() -> String? {
         guard let pluginsURL = Bundle(for: AppDelegate.self).builtInPlugInsURL,
               let urls = try? FileManager.default.contentsOfDirectory(
                   at: pluginsURL, includingPropertiesForKeys: nil)
         else { return nil }
-        return urls.first { $0.pathExtension == "appex" }
-            .flatMap { Bundle(url: $0)?.bundleIdentifier }
+        
+        let appBundleID = Bundle(for: AppDelegate.self).bundleIdentifier ?? ""
+        
+        for url in urls where url.pathExtension == "appex" {
+            guard let bundle = Bundle(url: url) else { continue }
+            guard let bundleID = bundle.bundleIdentifier else { continue }
+            
+            // Skip our own app's extensions
+            if bundleID.hasPrefix(appBundleID) { continue }
+            
+            // Check if this is a third-party extension named "Screen Mirroring"
+            // Third-party mirroring apps have bundle IDs starting with a domain pattern
+            // e.g., "com.company.ScreenMirroring" or similar
+            if bundleID.contains("ScreenMirroring") {
+                return bundleID
+            }
+            
+            // Also check the extension's display name in Info.plist
+            if let info = bundle.infoDictionary,
+               let name = info["CFBundleDisplayName"] as? String ?? info["CFBundleName"] as? String {
+                if name == "Screen Mirroring" {
+                    return bundleID
+                }
+            }
+        }
+        return nil
     }
 
     /// Shows the iOS system broadcast picker so the user can tap "Start Broadcast".

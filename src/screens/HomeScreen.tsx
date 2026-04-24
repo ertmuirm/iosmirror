@@ -47,7 +47,7 @@ export default function HomeScreen(): React.JSX.Element {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>iOS Mirror</Text>
+        <Text style={styles.title}>Mirror</Text>
       </View>
 
       {/* Scan indicator */}
