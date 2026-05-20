@@ -51,7 +51,6 @@
 		BB0F000000000000000002 /* MirrorBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MirrorBridge.swift; path = IOSMirror/MirrorBridge.swift; sourceTree = "<group>"; };
 		BB0F000000000000000003 /* MirrorBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MirrorBridge.m; path = IOSMirror/MirrorBridge.m; sourceTree = "<group>"; };
 		BB0F000000000000000004 /* HLSStreamServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HLSStreamServer.swift; path = IOSMirror/HLSStreamServer.swift; sourceTree = "<group>"; };
-		BB0F000000000000000005 /* TSPacketizer.swift */
 		BB0F000000000000000012 /* DLNADiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DLNADiscovery.swift; path = IOSMirror/DLNADiscovery.swift; sourceTree = "<group>"; };
 		BB0F000000000000000013 /* DLNASession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DLNASession.swift; path = IOSMirror/DLNASession.swift; sourceTree = "<group>"; };
 		BB0F000000000000000005 /* TSPacketizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TSPacketizer.swift; path = IOSMirror/TSPacketizer.swift; sourceTree = "<group>"; };
