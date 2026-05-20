@@ -283,7 +283,7 @@ final class DLNADiscovery {
     /// same host.  Also called directly from the mDNS path.
     private func probeSamsungDMR(host: String, port: Int, id: String,
                                   name: String?, mfr: String?) {
-        guard !knownDevices[id] != nil else { return }   // already added
+        guard knownDevices[id] == nil else { return }   // already added
 
         for (probePort, probePath) in samsungDMRProbes {
             guard let url = URL(string: "http://\(host):\(probePort)\(probePath)") else { continue }
