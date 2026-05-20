@@ -5,14 +5,30 @@ import UIKit
 import Darwin
 
 /// React Native native module that bridges the JS layer to the Google Cast SDK
-/// and the HLS stream server.
+/// and to DLNA/UPnP renderers (Samsung AllShare / Screen Mirror and compatible TVs).
 @objc(MirrorBridge)
 final class MirrorBridge: RCTEventEmitter {
 
     private var hasListeners = false
 
-    // Token for Darwin notify registration; -1 = not registered.
-    private var broadcastStoppedToken: Int32 = -1
+    // Held until "broadcastStarted" Darwin notification fires.
+    private var pendingDevice:     GCKDevice?
+    private var pendingDLNADevice: DLNADevice?
+
+    // Background task so Cast / DLNA can connect while the app is backgrounded.
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+
+    // Tokens for Darwin notify registrations; -1 = not registered.
+    private var broadcastStartedToken: Int32 = -1
+    private var broadcastStoppedToken:  Int32 = -1
+
+    // DLNA support
+    private let dlnaDiscovery = DLNADiscovery()
+    private var dlnaSession:        DLNASession?
+    private var dlnaDeviceRegistry: [String: DLNADevice] = [:]
+
+    // Cached Cast device list so we can merge with DLNA devices on every update.
+    private var castDeviceList: [[String: String]] = []
 
     // MARK: - RCTEventEmitter
 
@@ -22,13 +38,8 @@ final class MirrorBridge: RCTEventEmitter {
         ["onDevicesChanged", "onCastStateChanged", "onScanComplete", "onDebug"]
     }
 
-    override func startObserving() {
-        hasListeners = true
-    }
-
-    override func stopObserving() {
-        hasListeners = false
-    }
+    override func startObserving() { hasListeners = true  }
+    override func stopObserving()  { hasListeners = false }
 
     // MARK: - JS-callable Methods
 
@@ -39,12 +50,22 @@ final class MirrorBridge: RCTEventEmitter {
             ctx.discoveryManager.add(self)
             ctx.discoveryManager.startDiscovery()
         }
+
+        dlnaDiscovery.onUpdate = { [weak self] devices in
+            guard let self else { return }
+            // Callback is already dispatched to main queue by DLNADiscovery.
+            self.dlnaDeviceRegistry = Dictionary(
+                uniqueKeysWithValues: devices.map { ($0.id, $0) })
+            self.emitMergedDeviceList()
+        }
+        dlnaDiscovery.start()
     }
 
     @objc func stopDiscovery() {
         DispatchQueue.main.async {
             GCKCastContext.sharedInstance().discoveryManager.stopDiscovery()
         }
+        dlnaDiscovery.stop()
     }
 
     @objc func startMirror(
@@ -53,124 +74,176 @@ final class MirrorBridge: RCTEventEmitter {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
-            // Confirm the JS→native bridge is alive.
             self.emit("onDebug", body: "start_mirror_called")
 
-            let dm = GCKCastContext.sharedInstance().discoveryManager
-            var target: GCKDevice?
-            for i in 0..<dm.deviceCount {
-                let d = dm.device(at: i)
-                if d.deviceID == deviceID { target = d; break }
+            if let dlnaDevice = self.dlnaDeviceRegistry[deviceID] {
+                self.startDLNAMirror(dlnaDevice, resolve: resolve, reject: reject)
+            } else {
+                self.startCastMirror(deviceID, resolve: resolve, reject: reject)
             }
-            guard let device = target else {
-                reject("NOT_FOUND", "Chromecast device not found", nil)
-                return
-            }
-
-            HLSStreamServer.shared.start()
-
-            // Fires once port 9090 is actually bound and ready to accept.
-            HLSStreamServer.shared.onListenerReady = { [weak self] in
-                self?.emit("onDebug", body: "listener_ready:9090")
-            }
-
-            // Fires when the extension's TCP connection is established.
-            HLSStreamServer.shared.onExtensionConnected = { [weak self] in
-                self?.emit("onDebug", body: "tcp_connected")
-            }
-
-            // Fires when the first .ts segment is written to disk.
-            // If Cast is already up, load immediately; otherwise didStart handles it.
-            HLSStreamServer.shared.onFirstSegmentReady = { [weak self] in
-                guard let self else { return }
-                self.emit("onDebug", body: "first_segment_ready")
-                DispatchQueue.main.async {
-                    if let session = GCKCastContext.sharedInstance().sessionManager.currentCastSession {
-                        self.loadStream(on: session)
-                    }
-                    // else: Cast isn't connected yet — didStart will call loadStream
-                    // once it connects and finds segmentCount > 0.
-                }
-            }
-
-            // Belt-and-suspenders stop: TCP control frame from extension.
-            HLSStreamServer.shared.onBroadcastStopped = { [weak self] in
-                guard let self else { return }
-                self.emit("onDebug", body: "stopped_via_tcp")
-                self.cancelBroadcastNotifications()
-                GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
-                HLSStreamServer.shared.stop()
-                self.emit("onCastStateChanged", body: ["state": "idle"])
-            }
-
-            // Darwin notification stop: fires when user taps iOS stop button.
-            var stoppedTok: Int32 = -1
-            notify_register_dispatch(
-                "com.iosmirror.broadcastStopped", &stoppedTok, .main
-            ) { [weak self] _ in
-                guard let self else { return }
-                self.emit("onDebug", body: "stopped_via_darwin")
-                self.cancelBroadcastNotifications()
-                GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
-                HLSStreamServer.shared.stop()
-                self.emit("onCastStateChanged", body: ["state": "idle"])
-            }
-            self.broadcastStoppedToken = stoppedTok
-
-            // Start Cast and show the broadcast picker at the same time.
-            // The picker goes up immediately (no 5-second wait for Cast).
-            // Video loads via onFirstSegmentReady (Cast already up) or
-            // sessionManager:didStart: (Cast connects after broadcast starts).
-            GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
-            self.triggerBroadcastPicker()
-            
-            // Request extended background execution time
-            self.requestBackgroundTime()
-            
-            resolve(nil)
         }
     }
-    
-    private func requestBackgroundTime() {
-        var taskID: UIBackgroundTaskIdentifier = .invalid
-        taskID = UIApplication.shared.beginBackgroundTask(withName: "Streaming") {
-            // Expiration handler - end the task
-            UIApplication.shared.endBackgroundTask(taskID)
-            taskID = .invalid
-        }
-        
-        // Store task ID to end later (reuse same property)
-        backgroundTaskID = taskID
-    }
-    
-    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     @objc func stopMirror(
         _ resolve: @escaping RCTPromiseResolveBlock,
         reject _: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
-            // End background task
-            if self.backgroundTaskID != .invalid {
-                UIApplication.shared.endBackgroundTask(self.backgroundTaskID)
-                self.backgroundTaskID = .invalid
-            }
-            
+            self.pendingDevice     = nil
+            self.pendingDLNADevice = nil
             self.cancelBroadcastNotifications()
-            HLSStreamServer.shared.onBroadcastStopped  = nil
-            HLSStreamServer.shared.onFirstSegmentReady = nil
-            GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
-            HLSStreamServer.shared.stop()
+            self.endBackgroundTask()
+
+            if self.dlnaSession != nil {
+                self.dlnaSession?.stop { _ in }
+                self.dlnaSession = nil
+            } else {
+                GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
+            }
+            // When a broadcast is active this picker shows "Stop Broadcast".
+            self.triggerBroadcastPicker()
             resolve(nil)
         }
     }
 
+    // MARK: - Cast path
+
+    private func startCastMirror(
+        _ deviceID: String,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        let dm = GCKCastContext.sharedInstance().discoveryManager
+        var target: GCKDevice?
+        for i in 0..<dm.deviceCount {
+            let d = dm.device(at: i)
+            if d.deviceID == deviceID { target = d; break }
+        }
+        guard let device = target else {
+            reject("NOT_FOUND", "Chromecast device not found", nil)
+            return
+        }
+        pendingDevice = device
+        registerBroadcastNotifications()
+        triggerBroadcastPicker()
+        resolve(nil)
+    }
+
+    // MARK: - DLNA path
+
+    private func startDLNAMirror(
+        _ device: DLNADevice,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        pendingDLNADevice = device
+        registerBroadcastNotifications()
+        triggerBroadcastPicker()
+        resolve(nil)
+    }
+
+    private func connectDLNA(device: DLNADevice) {
+        guard let url = HLSStreamServer.shared.streamURL else {
+            emit("onDebug", body: "dlna_no_ip")
+            endBackgroundTask()
+            emit("onCastStateChanged", body: ["state": "idle"])
+            return
+        }
+        let session = DLNASession(controlURL: device.controlURL)
+        dlnaSession = session
+        emit("onDebug", body: "dlna_connecting:\(url)")
+        session.loadAndPlay(url) { [weak self] err in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.endBackgroundTask()
+                if let err {
+                    self.dlnaSession = nil
+                    self.emit("onDebug", body: "dlna_error:\(err.localizedDescription)")
+                    self.emit("onCastStateChanged", body: ["state": "idle"])
+                } else {
+                    self.emit("onDebug", body: "dlna_playing")
+                    self.emit("onCastStateChanged", body: ["state": "mirroring"])
+                }
+            }
+        }
+    }
+
+    // MARK: - Shared broadcast notification handling
+
+    private func registerBroadcastNotifications() {
+        cancelBroadcastNotifications()
+
+        // "broadcastStarted" fires after the 3-second countdown ends —
+        // the extension's HTTP server is already listening at this point.
+        var startedTok: Int32 = -1
+        notify_register_dispatch(
+            "com.iosmirror.broadcastStarted", &startedTok, .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.emit("onDebug", body: "broadcast_started_received")
+            self.backgroundTaskID = UIApplication.shared.beginBackgroundTask {
+                self.endBackgroundTask()
+            }
+            if let device = self.pendingDevice {
+                self.pendingDevice = nil
+                GCKCastContext.sharedInstance().sessionManager.startSession(with: device)
+            } else if let dlnaDevice = self.pendingDLNADevice {
+                self.pendingDLNADevice = nil
+                self.connectDLNA(device: dlnaDevice)
+            }
+        }
+        broadcastStartedToken = startedTok
+
+        // "broadcastStopped" fires when the user taps the iOS stop button.
+        var stoppedTok: Int32 = -1
+        notify_register_dispatch(
+            "com.iosmirror.broadcastStopped", &stoppedTok, .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.emit("onDebug", body: "stopped_via_darwin")
+            self.cancelBroadcastNotifications()
+            self.endBackgroundTask()
+            if self.dlnaSession != nil {
+                self.dlnaSession?.stop { _ in }
+                self.dlnaSession = nil
+            } else {
+                GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
+            }
+            self.emit("onCastStateChanged", body: ["state": "idle"])
+        }
+        broadcastStoppedToken = stoppedTok
+    }
+
     // MARK: - Helpers
 
+    private func emitMergedDeviceList() {
+        var list = castDeviceList
+        for device in dlnaDeviceRegistry.values {
+            list.append([
+                "deviceId":  device.id,
+                "name":      device.name,
+                "modelName": device.manufacturer,
+                "type":      "dlna",
+            ])
+        }
+        emit("onDevicesChanged", body: list)
+    }
+
     private func cancelBroadcastNotifications() {
+        if broadcastStartedToken != -1 {
+            notify_cancel(broadcastStartedToken)
+            broadcastStartedToken = -1
+        }
         if broadcastStoppedToken != -1 {
             notify_cancel(broadcastStoppedToken)
             broadcastStoppedToken = -1
+        }
+    }
+
+    private func endBackgroundTask() {
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            backgroundTaskID = .invalid
         }
     }
 
@@ -179,9 +252,11 @@ final class MirrorBridge: RCTEventEmitter {
         sendEvent(withName: name, body: body)
     }
 
-    /// Loads the HLS URL on the connected Chromecast session.
     private func loadStream(on session: GCKCastSession) {
-        guard let url = HLSStreamServer.shared.streamURL else { return }
+        guard let url = HLSStreamServer.shared.streamURL else {
+            emit("onDebug", body: "load_stream_no_ip")
+            return
+        }
         let builder = GCKMediaInformationBuilder(contentURL: url)
         builder.streamType = .live
         builder.contentType = "application/vnd.apple.mpegurl"
@@ -189,44 +264,18 @@ final class MirrorBridge: RCTEventEmitter {
         let request = GCKMediaLoadRequestDataBuilder()
         request.mediaInformation = media
         session.remoteMediaClient?.loadMedia(with: request.build())
-        emit("onDebug", body: "load_stream_called:\(url)")
+        emit("onDebug", body: "load_stream:\(url)")
     }
 
-    /// Finds a third-party broadcast extension with the name "Screen Mirroring".
     private func installedBroadcastExtensionBundleID() -> String? {
         guard let pluginsURL = Bundle(for: AppDelegate.self).builtInPlugInsURL,
               let urls = try? FileManager.default.contentsOfDirectory(
                   at: pluginsURL, includingPropertiesForKeys: nil)
         else { return nil }
-        
-        let appBundleID = Bundle(for: AppDelegate.self).bundleIdentifier ?? ""
-        
-        for url in urls where url.pathExtension == "appex" {
-            guard let bundle = Bundle(url: url) else { continue }
-            guard let bundleID = bundle.bundleIdentifier else { continue }
-            
-            // Skip our own app's extensions
-            if bundleID.hasPrefix(appBundleID) { continue }
-            
-            // Check if this is a third-party extension named "Screen Mirroring"
-            // Third-party mirroring apps have bundle IDs starting with a domain pattern
-            // e.g., "com.company.ScreenMirroring" or similar
-            if bundleID.contains("ScreenMirroring") {
-                return bundleID
-            }
-            
-            // Also check the extension's display name in Info.plist
-            if let info = bundle.infoDictionary,
-               let name = info["CFBundleDisplayName"] as? String ?? info["CFBundleName"] as? String {
-                if name == "Screen Mirroring" {
-                    return bundleID
-                }
-            }
-        }
-        return nil
+        return urls.first { $0.pathExtension == "appex" }
+            .flatMap { Bundle(url: $0)?.bundleIdentifier }
     }
 
-    /// Shows the iOS system broadcast picker so the user can tap "Start Broadcast".
     private func triggerBroadcastPicker() {
         guard let windowScene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
@@ -256,13 +305,11 @@ extension MirrorBridge: GCKSessionManagerListener {
         _ sessionManager: GCKSessionManager,
         didStart session: GCKCastSession
     ) {
+        // The extension has been running for ~5 s by now, so at least
+        // one HLS segment exists. Load immediately for fast video start.
         emit("onDebug", body: "cast_connected")
-        // If the broadcast started before Cast finished connecting,
-        // segments are already on disk — load the stream immediately.
-        if HLSStreamServer.shared.segmentCount > 0 {
-            loadStream(on: session)
-        }
-        // Otherwise onFirstSegmentReady will call loadStream once segments arrive.
+        loadStream(on: session)
+        endBackgroundTask()
         emit("onCastStateChanged", body: ["state": "mirroring"])
     }
 
@@ -271,6 +318,7 @@ extension MirrorBridge: GCKSessionManagerListener {
         didEnd session: GCKCastSession,
         withError error: Error?
     ) {
+        endBackgroundTask()
         emit("onCastStateChanged", body: ["state": "idle"])
     }
 
@@ -280,9 +328,7 @@ extension MirrorBridge: GCKSessionManagerListener {
         withError error: Error
     ) {
         cancelBroadcastNotifications()
-        HLSStreamServer.shared.onBroadcastStopped  = nil
-        HLSStreamServer.shared.onFirstSegmentReady = nil
-        HLSStreamServer.shared.stop()
+        endBackgroundTask()
         emit("onCastStateChanged", body: ["state": "idle"])
         emit("onDebug", body: "cast_failed:\(error.localizedDescription)")
     }
@@ -301,14 +347,14 @@ extension MirrorBridge: GCKDiscoveryManagerListener {
                 "deviceId":  d.deviceID,
                 "name":      d.friendlyName ?? d.deviceID,
                 "modelName": d.modelName    ?? "Chromecast",
+                "type":      "cast",
             ])
         }
-        emit("onDevicesChanged", body: list)
+        castDeviceList = list
+        emitMergedDeviceList()
     }
 
-    func didHaveDiscoveryRequest() {
-        // nothing needed
-    }
+    func didHaveDiscoveryRequest() {}
 
     func discoveryManagerDidStopDiscovery(_ discoveryManager: GCKDiscoveryManager) {
         emit("onScanComplete", body: NSNull())

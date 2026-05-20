@@ -21,7 +21,7 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>iOS Mirror uses the local network to discover Chromecast devices and stream your screen.</string>
+    <string>iOS Mirror uses the local network to discover Chromecast and DLNA devices (including Samsung AllShare and Screen Mirror TVs) and to stream your screen to them.</string>
     <key>NSBonjourServices</key>
     <array>
         <string>_googlecast._tcp</string>

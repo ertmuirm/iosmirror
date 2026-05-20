@@ -21,7 +21,7 @@ export default function DeviceList({ devices, selectedDevice, onSelect }: Props)
       <View style={styles.empty}>
         <Text style={styles.emptyTitle}>No devices found</Text>
         <Text style={styles.emptyBody}>
-          Make sure your Chromecast and iPhone are on the same Wi-Fi network.
+          Make sure your Chromecast or Samsung TV and iPhone are on the same Wi-Fi network.
         </Text>
       </View>
     );
@@ -39,7 +39,10 @@ export default function DeviceList({ devices, selectedDevice, onSelect }: Props)
       >
         <View style={styles.info}>
           <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-          <Text style={styles.model} numberOfLines={1}>{item.modelName}</Text>
+          <Text style={styles.model} numberOfLines={1}>
+            {item.modelName}
+            {item.type === 'dlna' ? '  ·  DLNA' : ''}
+          </Text>
         </View>
         {selected && (
           <View style={styles.checkWrap}>

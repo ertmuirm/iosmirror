@@ -8,6 +8,7 @@ export interface CastDevice {
   deviceId: string;
   name: string;
   modelName: string;
+  type?: 'cast' | 'dlna';
 }
 
 export type CastState = 'idle' | 'connecting' | 'mirroring' | 'disconnecting';
