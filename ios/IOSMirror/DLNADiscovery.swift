@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Network
 
 struct DLNADevice {
     let id: String
@@ -10,25 +11,29 @@ struct DLNADevice {
 
 /// Discovers DLNA MediaRenderer devices via SSDP and Samsung TVs via mDNS.
 ///
-/// Two-pronged approach:
-///   1. SSDP M-SEARCH with multiple ST values, socket explicitly bound to the
-///      WiFi interface so multicast goes out the right NIC (not cellular).
-///   2. NetServiceBrowser for _samsungtvpresence._tcp, which reliably triggers
-///      iOS Local-Network permission and catches Samsung SmartHub TVs that
-///      don't respond to standard MediaRenderer:1 queries.
+/// Three-pronged approach:
+///   1. Active M-SEARCH: sends UDP multicast queries, socket explicitly bound
+///      to the WiFi interface so multicast goes out the right NIC.
+///   2. Passive NOTIFY listener: joins the SSDP multicast group on port 1900
+///      and receives unsolicited alive/byebye messages that Samsung TVs
+///      broadcast periodically — works even if M-SEARCH responses are blocked.
+///   3. NetServiceBrowser for _samsungtvpresence._tcp (mDNS): reliably
+///      triggers iOS Local Network permission and catches Samsung SmartHub
+///      TVs that don't respond to SSDP queries.
 final class DLNADiscovery {
 
     var onUpdate: (([DLNADevice]) -> Void)?
+    var onDebug:  ((String) -> Void)?          // wired to MirrorBridge onDebug
 
     private var running = false
     private var knownUUIDs:   Set<String>          = []
     private var knownDevices: [String: DLNADevice] = [:]
-    private let queue = DispatchQueue(label: "com.iosmirror.dlna.discovery", qos: .utility)
+
+    private let searchQueue   = DispatchQueue(label: "com.iosmirror.dlna.search",   qos: .utility)
+    private let listenerQueue = DispatchQueue(label: "com.iosmirror.dlna.listener", qos: .utility)
 
     private var mdnsBrowser: SamsungMDNSBrowser?
 
-    // ST values sent each cycle.  Samsung SmartHub TVs often only respond to
-    // upnp:rootdevice and the Samsung-specific ST, not MediaRenderer:1.
     private let searchTargets: [String] = [
         "upnp:rootdevice",
         "urn:schemas-upnp-org:device:MediaRenderer:1",
@@ -37,27 +42,34 @@ final class DLNADiscovery {
         "ssdp:all",
     ]
 
-    // Paths probed when a Samsung TV is found via mDNS but not via SSDP.
     private let samsungDLNAProbes: [(port: Int, path: String)] = [
         (7676,  "/dmr/SamsungMRDesc.xml"),
         (7676,  "/MediaRenderer.xml"),
         (52235, "/dmr/SamsungMRDesc.xml"),
         (52235, "/MediaRenderer.xml"),
         (55001, "/MainTVServer2desc.xml"),
-        (7676,  "/"),                   // some models serve description at root
+        (7676,  "/"),
     ]
+
+    // MARK: - Lifecycle
 
     func start() {
         guard !running else { return }
         running = true
-        scheduleSSDPCycle()
 
-        // NetServiceBrowser must run on a thread with a RunLoop (main is fine).
+        // 1. Active M-SEARCH cycle
+        scheduleMSearchCycle()
+
+        // 2. Passive NOTIFY listener on the multicast group (port 1900)
+        listenerQueue.async { [weak self] in self?.runNotifyListener() }
+
+        // 3. Samsung mDNS browser (must run on a thread with RunLoop)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let b = SamsungMDNSBrowser()
             b.onDeviceFound = { [weak self] host in
-                self?.queue.async { self?.probeSamsungTV(host: host) }
+                self?.onDebug?("dlna_mdns_found:\(host)")
+                self?.searchQueue.async { self?.probeSamsungTV(host: host) }
             }
             b.start()
             self.mdnsBrowser = b
@@ -72,42 +84,43 @@ final class DLNADiscovery {
         }
     }
 
-    // MARK: - SSDP cycle
+    // MARK: - Active M-SEARCH
 
-    private func scheduleSSDPCycle() {
+    private func scheduleMSearchCycle() {
         guard running else { return }
-        queue.async { [weak self] in
-            self?.performSSDPSearch()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
-                self?.scheduleSSDPCycle()
+        searchQueue.async { [weak self] in
+            self?.performMSearch()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+                self?.scheduleMSearchCycle()
             }
         }
     }
 
-    private func performSSDPSearch() {
-        // Bind explicitly to the WiFi interface so multicast doesn't leak
-        // over cellular, which can't reach LAN devices.
-        let localIPStr = HLSStreamServer.shared.detectLocalIP() ?? "0.0.0.0"
+    private func performMSearch() {
+        guard let localIPStr = HLSStreamServer.shared.detectLocalIP() else {
+            onDebug?("dlna_no_wifi_ip")
+            return
+        }
+        onDebug?("dlna_search_start:\(localIPStr)")
 
         let sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-        guard sock >= 0 else { return }
+        guard sock >= 0 else { onDebug?("dlna_socket_failed"); return }
         defer { Darwin.close(sock) }
 
         var yes: Int32 = 1
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
 
+        // Bind explicitly to WiFi IP so multicast doesn't route through cellular.
         var local = sockaddr_in()
         local.sin_family = sa_family_t(AF_INET)
         local.sin_port   = 0
         local.sin_addr   = in_addr(s_addr: inet_addr(localIPStr))
-        let bindOK = withUnsafePointer(to: &local) {
+        guard withUnsafePointer(to: &local, {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
             }
-        }
-        guard bindOK == 0 else { return }
+        }) else { onDebug?("dlna_bind_failed:\(errno)"); return }
 
-        // Force multicast out the WiFi interface.
         var mcastIf = in_addr(s_addr: inet_addr(localIPStr))
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,
                    &mcastIf, socklen_t(MemoryLayout<in_addr>.size))
@@ -115,35 +128,39 @@ final class DLNADiscovery {
         var ttl: UInt8 = 4
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, socklen_t(1))
 
-        // Generous timeout: we send 5 queries × 150 ms gap = 750 ms,
-        // then wait up to 6 s for responses from slower Samsung TVs.
         var tv = timeval(tv_sec: 6, tv_usec: 0)
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
+        var sentCount = 0
         for st in searchTargets {
-            sendMSearch(sock: sock, st: st)
+            if sendMSearch(sock: sock, st: st) { sentCount += 1 }
             Thread.sleep(forTimeInterval: 0.15)
         }
+        onDebug?("dlna_search_sent:\(sentCount)")
 
         var seen = Set<String>()
         var buf  = [UInt8](repeating: 0, count: 8192)
+        var responseCount = 0
         while running {
             let n = recv(sock, &buf, buf.count - 1, 0)
-            guard n > 0 else { break }
+            if n <= 0 { break }   // timeout (EAGAIN) or closed
             buf[Int(n)] = 0
-            let response = String(bytes: buf[0..<Int(n)], encoding: .utf8) ?? ""
-            handleSSDPResponse(response, seen: &seen)
+            let msg = String(bytes: buf[0..<Int(n)], encoding: .utf8) ?? ""
+            responseCount += 1
+            handleSSDPMessage(msg, localSeen: &seen, source: "msearch")
         }
+        onDebug?("dlna_search_responses:\(responseCount)")
     }
 
-    private func sendMSearch(sock: Int32, st: String) {
+    @discardableResult
+    private func sendMSearch(sock: Int32, st: String) -> Bool {
         let msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 3\r\nST: \(st)\r\n\r\n"
-        guard let data = msg.data(using: .utf8) else { return }
+        guard let data = msg.data(using: .utf8) else { return false }
         var dest = sockaddr_in()
         dest.sin_family = sa_family_t(AF_INET)
         dest.sin_port   = UInt16(1900).bigEndian
         dest.sin_addr   = in_addr(s_addr: inet_addr("239.255.255.250"))
-        data.withUnsafeBytes { bytes in
+        let sent = data.withUnsafeBytes { bytes in
             withUnsafePointer(to: &dest) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                     sendto(sock, bytes.baseAddress, bytes.count, 0, $0,
@@ -151,48 +168,73 @@ final class DLNADiscovery {
                 }
             }
         }
+        return sent == data.count
     }
 
-    // MARK: - SSDP response handling
+    // MARK: - Passive NOTIFY listener
 
-    private func handleSSDPResponse(_ response: String, seen: inout Set<String>) {
-        var location: String?
-        var usn: String?
-        for line in response.components(separatedBy: "\r\n") {
-            let lower = line.lowercased()
-            if lower.hasPrefix("location:") {
-                location = String(line.dropFirst(9)).trimmingCharacters(in: .whitespaces)
-            } else if lower.hasPrefix("usn:") {
-                usn = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+    /// Listens on the SSDP multicast group (239.255.255.250:1900) for
+    /// unsolicited ssdp:alive NOTIFY messages.  Samsung TVs broadcast
+    /// these periodically (~every 30 min) and immediately on power-on.
+    private func runNotifyListener() {
+        guard let localIPStr = HLSStreamServer.shared.detectLocalIP() else { return }
+        onDebug?("dlna_notify_listener_starting")
+
+        let sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard sock >= 0 else { return }
+        defer { Darwin.close(sock) }
+
+        var yes: Int32 = 1
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout<Int32>.size))
+
+        // Must bind to INADDR_ANY:1900 to receive multicast NOTIFY messages.
+        var local = sockaddr_in()
+        local.sin_family = sa_family_t(AF_INET)
+        local.sin_port   = UInt16(1900).bigEndian
+        local.sin_addr   = in_addr(s_addr: 0)
+        guard withUnsafePointer(to: &local, {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }) else { onDebug?("dlna_notify_bind_failed:\(errno)"); return }
+
+        // Join the SSDP multicast group on the WiFi interface.
+        var mreq = ip_mreq()
+        mreq.imr_multiaddr = in_addr(s_addr: inet_addr("239.255.255.250"))
+        mreq.imr_interface = in_addr(s_addr: inet_addr(localIPStr))
+        let joined = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                                &mreq, socklen_t(MemoryLayout<ip_mreq>.size)) == 0
+        onDebug?("dlna_notify_listener_ready:joined=\(joined)")
+
+        // Short receive timeout so we can check the `running` flag.
+        var tv = timeval(tv_sec: 1, tv_usec: 0)
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        var buf  = [UInt8](repeating: 0, count: 8192)
+        var seen = Set<String>()        // grows for the lifetime of the listener
+        while running {
+            let n = recv(sock, &buf, buf.count - 1, 0)
+            if n <= 0 { continue }     // timeout — loop again, check `running`
+            buf[Int(n)] = 0
+            let msg = String(bytes: buf[0..<Int(n)], encoding: .utf8) ?? ""
+            // Only process ssdp:alive NOTIFY, not byebye or M-SEARCH
+            if msg.contains("NTS: ssdp:alive") || msg.contains("NTS:ssdp:alive") {
+                handleSSDPMessage(msg, localSeen: &seen, source: "notify")
             }
         }
-        guard let loc = location, let rawUSN = usn else { return }
-
-        // Deduplicate by device UUID — Samsung TVs reply once per ST value,
-        // all pointing to the same LOCATION.
-        let uuid = deviceUUID(from: rawUSN)
-        guard !seen.contains(loc), !knownUUIDs.contains(uuid) else { return }
-        seen.insert(loc)
-        knownUUIDs.insert(uuid)
-
-        guard let url = URL(string: loc) else { return }
-        fetchAndRegister(from: url, id: uuid)
-    }
-
-    private func deviceUUID(from usn: String) -> String {
-        let s = usn.hasPrefix("uuid:") ? String(usn.dropFirst(5)) : usn
-        return s.components(separatedBy: "::").first ?? s
+        // Leave multicast group cleanly
+        setsockopt(sock, IPPROTO_IP, IP_DROP_MEMBERSHIP,
+                   &mreq, socklen_t(MemoryLayout<ip_mreq>.size))
     }
 
     // MARK: - Samsung mDNS probe
 
-    /// Called when a Samsung TV is found via _samsungtvpresence._tcp mDNS.
-    /// Older SmartHub TVs may not respond to SSDP at all, so we probe their
-    /// well-known DLNA ports directly once we have their IP.
     private func probeSamsungTV(host: String) {
         let id = "samsung-\(host)"
         guard !knownUUIDs.contains(id) else { return }
         knownUUIDs.insert(id)
+        onDebug?("dlna_probing_samsung:\(host)")
 
         for (port, path) in samsungDLNAProbes {
             guard let url = URL(string: "http://\(host):\(port)\(path)") else { continue }
@@ -207,19 +249,54 @@ final class DLNADiscovery {
             sem.wait()
 
             if let (data, baseURL) = hit,
-               let xml = String(data: data, encoding: .utf8),
-               let device = DescriptionParser(xml: xml, baseURL: baseURL, id: id).parse() {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.knownDevices[id] = device
-                    self.onUpdate?(Array(self.knownDevices.values))
+               let xml = String(data: data, encoding: .utf8) {
+                onDebug?("dlna_samsung_desc_found:\(host):\(port)\(path)")
+                if let device = DescriptionParser(xml: xml, baseURL: baseURL, id: id).parse() {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.knownDevices[id] = device
+                        self.onUpdate?(Array(self.knownDevices.values))
+                    }
+                    return
+                } else {
+                    onDebug?("dlna_samsung_no_avt:\(host):\(port)\(path)")
                 }
-                return
             }
         }
+        onDebug?("dlna_samsung_probe_done:\(host):no_avt_found")
     }
 
-    // MARK: - Device description fetch (SSDP path)
+    // MARK: - SSDP message handling (shared by M-SEARCH and NOTIFY)
+
+    private func handleSSDPMessage(_ msg: String, localSeen: inout Set<String>, source: String) {
+        var location: String?
+        var usn: String?
+        for line in msg.components(separatedBy: "\r\n") {
+            let lower = line.lowercased()
+            if lower.hasPrefix("location:") {
+                location = String(line.dropFirst(9)).trimmingCharacters(in: .whitespaces)
+            } else if lower.hasPrefix("usn:") {
+                usn = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        guard let loc = location, let rawUSN = usn else { return }
+
+        let uuid = deviceUUID(from: rawUSN)
+        guard !localSeen.contains(loc), !knownUUIDs.contains(uuid) else { return }
+        localSeen.insert(loc)
+        knownUUIDs.insert(uuid)
+
+        onDebug?("dlna_\(source)_hit:\(uuid.prefix(8)):\(loc)")
+        guard let url = URL(string: loc) else { return }
+        fetchAndRegister(from: url, id: uuid)
+    }
+
+    private func deviceUUID(from usn: String) -> String {
+        let s = usn.hasPrefix("uuid:") ? String(usn.dropFirst(5)) : usn
+        return s.components(separatedBy: "::").first ?? s
+    }
+
+    // MARK: - Device description fetch
 
     private func fetchAndRegister(from url: URL, id: String) {
         let sem = DispatchSemaphore(value: 0)
@@ -229,24 +306,24 @@ final class DLNADiscovery {
         }.resume()
         sem.wait()
         guard let data = responseData,
-              let xml = String(data: data, encoding: .utf8),
-              let device = DescriptionParser(xml: xml, baseURL: url, id: id).parse()
-        else { return }
+              let xml = String(data: data, encoding: .utf8)
+        else { onDebug?("dlna_desc_fetch_failed:\(url.host ?? "?")"); return }
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.knownDevices[device.id] = device
-            self.onUpdate?(Array(self.knownDevices.values))
+        if let device = DescriptionParser(xml: xml, baseURL: url, id: id).parse() {
+            onDebug?("dlna_device_added:\(device.name)")
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.knownDevices[device.id] = device
+                self.onUpdate?(Array(self.knownDevices.values))
+            }
+        } else {
+            onDebug?("dlna_desc_no_avt:\(url.host ?? "?"):\(url.port ?? 0)")
         }
     }
 }
 
 // MARK: - Samsung SmartHub mDNS browser
 
-/// Browses for _samsungtvpresence._tcp on the local network.
-/// Using NetServiceBrowser is important on iOS 14+: it reliably triggers
-/// the Local Network permission prompt, which in turn unblocks our SSDP
-/// UDP multicast traffic as well.
 private final class SamsungMDNSBrowser: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
 
     var onDeviceFound: ((String) -> Void)?
@@ -266,8 +343,7 @@ private final class SamsungMDNSBrowser: NSObject, NetServiceBrowserDelegate, Net
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser,
-                           didFind service: NetService,
-                           moreComing: Bool) {
+                           didFind service: NetService, moreComing: Bool) {
         pending.append(service)
         service.delegate = self
         service.resolve(withTimeout: 5)
@@ -279,9 +355,7 @@ private final class SamsungMDNSBrowser: NSObject, NetServiceBrowserDelegate, Net
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser,
-                           didNotSearch errorDict: [String: NSNumber]) {
-        // mDNS browse unavailable — SSDP cycle is still running.
-    }
+                           didNotSearch errorDict: [String: NSNumber]) {}
 
     private func ipv4Address(from service: NetService) -> String? {
         guard let addresses = service.addresses else { return nil }
@@ -302,10 +376,6 @@ private final class SamsungMDNSBrowser: NSObject, NetServiceBrowserDelegate, Net
 
 // MARK: - UPnP device description XML parser
 
-/// Walks the entire device/sub-device tree looking for an AVTransport service.
-/// Samsung SmartHub TVs embed MediaRenderer and AVTransport inside a child
-/// device under a Samsung-proprietary root device type, so the whole tree
-/// must be searched.
 private final class DescriptionParser: NSObject, XMLParserDelegate {
     private let xml: String
     private let baseURL: URL
@@ -338,10 +408,8 @@ private final class DescriptionParser: NSObject, XMLParserDelegate {
         )
     }
 
-    func parser(_ parser: XMLParser,
-                didStartElement name: String,
-                namespaceURI: String?,
-                qualifiedName: String?,
+    func parser(_ parser: XMLParser, didStartElement name: String,
+                namespaceURI: String?, qualifiedName: String?,
                 attributes: [String: String]) { path.append(name) }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
@@ -356,10 +424,8 @@ private final class DescriptionParser: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(_ parser: XMLParser,
-                didEndElement name: String,
-                namespaceURI: String?,
-                qualifiedName: String?) {
+    func parser(_ parser: XMLParser, didEndElement name: String,
+                namespaceURI: String?, qualifiedName: String?) {
         if name == "service" {
             if curServiceType.contains("AVTransport") && avControlURL.isEmpty {
                 avControlURL = curControlURL

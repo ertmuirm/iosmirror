@@ -53,10 +53,12 @@ final class MirrorBridge: RCTEventEmitter {
 
         dlnaDiscovery.onUpdate = { [weak self] devices in
             guard let self else { return }
-            // Callback is already dispatched to main queue by DLNADiscovery.
             self.dlnaDeviceRegistry = Dictionary(
                 uniqueKeysWithValues: devices.map { ($0.id, $0) })
             self.emitMergedDeviceList()
+        }
+        dlnaDiscovery.onDebug = { [weak self] msg in
+            self?.emit("onDebug", body: msg)
         }
         dlnaDiscovery.start()
     }
