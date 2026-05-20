@@ -25,6 +25,8 @@
     <key>NSBonjourServices</key>
     <array>
         <string>_googlecast._tcp</string>
+        <string>_samsungtvpresence._tcp</string>
+        <string>_amzn-wplay._tcp</string>
     </array>
     <key>UILaunchScreen</key>
     <dict/>
