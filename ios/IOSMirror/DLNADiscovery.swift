@@ -215,7 +215,7 @@ final class DLNADiscovery {
 
         var ips: [String] = []
         var offset = 0
-        let rtmSize = MemoryLayout<rt_msghdr>.size
+        let rtmSize = MemoryLayout<rt_msghdr_ios>.size
 
         while offset + rtmSize <= needed {
             // rtm_msglen is the first u_short (little-endian on ARM)
