@@ -351,9 +351,14 @@ final class DLNADiscovery {
         guard let loc = location else { return }
         let rawUSN = usn ?? loc
         let uuid   = deviceUUID(from: rawUSN)
+        // Deduplicate by LOCATION within this scan session.
+        // Do NOT deduplicate by UUID here — Samsung TVs send multiple SSDP responses
+        // with the same UUID but different LOCATION URLs: one for the root device
+        // (MainTVServer2, no AVTransport) and one directly for the MediaRenderer
+        // (which has AVTransport). Blocking on UUID causes the renderer URL to be
+        // skipped. We only block on UUID after successful device registration.
         guard !localSeen.contains(loc), !knownUUIDs.contains(uuid) else { return }
         localSeen.insert(loc)
-        knownUUIDs.insert(uuid)
         onDebug?("dlna_hit:\(uuid.prefix(8)):\(loc)")
         guard let url = URL(string: loc) else {
             onDebug?("dlna_bad_url:\(loc)"); return
@@ -386,6 +391,7 @@ final class DLNADiscovery {
                                     controlURL: controlURL)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.knownUUIDs.insert(id)   // block further SSDP responses for this UUID
                 self.knownDevices[id] = device
                 self.onUpdate?(Array(self.knownDevices.values))
             }
@@ -427,6 +433,7 @@ final class DLNADiscovery {
                                        manufacturer: displayMfr, controlURL: controlURL)
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
+                    self.knownUUIDs.insert(id)
                     self.knownDevices[id] = device
                     self.onUpdate?(Array(self.knownDevices.values))
                 }
