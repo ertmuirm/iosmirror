@@ -105,28 +105,40 @@ final class DLNADiscovery {
 
         var yes: Int32 = 1
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout<Int32>.size))
 
+        // Try binding to port 1900 first — some Samsung TVs only unicast replies
+        // back to source port 1900.  Fall back to ephemeral port if 1900 is taken.
         var local = sockaddr_in()
         local.sin_family = sa_family_t(AF_INET)
-        local.sin_port   = 0
+        local.sin_port   = UInt16(1900).bigEndian
         local.sin_addr   = in_addr(s_addr: inet_addr(localIPStr))
-        guard withUnsafePointer(to: &local, {
+        let bound1900 = withUnsafePointer(to: &local, {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
             }
-        }) else { onDebug?("dlna_bind_failed:\(errno)"); return }
+        })
+        if !bound1900 {
+            local.sin_port = 0
+            guard withUnsafePointer(to: &local, {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+                }
+            }) else { onDebug?("dlna_bind_failed:\(errno)"); return }
+        }
+        onDebug?("dlna_search_bound_port1900:\(bound1900)")
 
         var mcastIf = in_addr(s_addr: inet_addr(localIPStr))
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &mcastIf, socklen_t(MemoryLayout<in_addr>.size))
         var ttl: UInt8 = 4
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, socklen_t(1))
-        var tv = timeval(tv_sec: 6, tv_usec: 0)
+        var tv = timeval(tv_sec: 10, tv_usec: 0)
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
         var sentCount = 0
         for st in searchTargets {
             if sendMSearch(sock: sock, st: st) { sentCount += 1 }
-            Thread.sleep(forTimeInterval: 0.15)
+            Thread.sleep(forTimeInterval: 0.25)
         }
         onDebug?("dlna_search_sent:\(sentCount)")
 
@@ -146,7 +158,7 @@ final class DLNADiscovery {
 
     @discardableResult
     private func sendMSearch(sock: Int32, st: String) -> Bool {
-        let msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 3\r\nST: \(st)\r\n\r\n"
+        let msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 5\r\nST: \(st)\r\n\r\n"
         guard let data = msg.data(using: .utf8) else { return false }
         var dest = sockaddr_in()
         dest.sin_family = sa_family_t(AF_INET)

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import DeviceList from '../components/DeviceList';
 import { useMirrorBridge } from '../hooks/useMirrorBridge';
@@ -16,10 +17,13 @@ export default function HomeScreen(): React.JSX.Element {
     scanning,
     castState,
     selectedDevice,
+    debugLog,
     selectDevice,
     startMirror,
     stopMirror,
   } = useMirrorBridge();
+
+  const [showDebug, setShowDebug] = useState(false);
 
   const handleMirrorPress = useCallback(async () => {
     if (castState === 'mirroring') {
@@ -86,6 +90,21 @@ export default function HomeScreen(): React.JSX.Element {
           <Text style={styles.buttonText}>{mirrorLabel}</Text>
         )}
       </TouchableOpacity>
+
+      {/* Debug panel */}
+      <TouchableOpacity onPress={() => setShowDebug(v => !v)} activeOpacity={0.7}>
+        <Text style={styles.debugToggle}>{showDebug ? 'Hide debug' : 'Show debug'}</Text>
+      </TouchableOpacity>
+      {showDebug && (
+        <ScrollView style={styles.debugBox} contentContainerStyle={styles.debugContent}>
+          {debugLog.length === 0
+            ? <Text style={styles.debugLine}>No events yet</Text>
+            : debugLog.map((line, i) => (
+                <Text key={i} style={styles.debugLine}>{line}</Text>
+              ))
+          }
+        </ScrollView>
+      )}
 
     </View>
   );
@@ -154,5 +173,26 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  debugToggle: {
+    color: '#555555',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  debugBox: {
+    backgroundColor: '#111111',
+    borderRadius: 8,
+    maxHeight: 180,
+    marginBottom: 14,
+  },
+  debugContent: {
+    padding: 10,
+    gap: 3,
+  },
+  debugLine: {
+    color: '#00ff88',
+    fontSize: 11,
+    fontFamily: 'Menlo',
   },
 });
