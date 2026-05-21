@@ -17,38 +17,22 @@ final class HLSStreamServer {
 
     /// Returns the device's current en0 (WiFi) IPv4 address, or nil if not on WiFi.
     func detectLocalIP() -> String? {
-        return en0Info()?.ip
-    }
-
-    /// Returns the WiFi broadcast address (e.g. "192.168.1.255"), or nil.
-    func detectBroadcastAddress() -> String? {
-        return en0Info()?.broadcast
-    }
-
-    private func en0Info() -> (ip: String, broadcast: String)? {
         var addr: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&addr) == 0 else { return nil }
         defer { freeifaddrs(addr) }
         var ptr = addr
         while let p = ptr {
-            guard let sa = p.pointee.ifa_addr,
-                  sa.pointee.sa_family == UInt8(AF_INET),
-                  String(cString: p.pointee.ifa_name) == "en0"
-            else { ptr = p.pointee.ifa_next; continue }
-
-            var ipBuf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            getnameinfo(sa, socklen_t(sa.pointee.sa_len),
-                        &ipBuf, socklen_t(ipBuf.count), nil, 0, NI_NUMERICHOST)
-            let ip = String(cString: ipBuf)
-
-            var bcast = "255.255.255.255"
-            if let dstSA = p.pointee.ifa_dstaddr, dstSA.pointee.sa_family == UInt8(AF_INET) {
-                var bBuf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                getnameinfo(dstSA, socklen_t(dstSA.pointee.sa_len),
-                            &bBuf, socklen_t(bBuf.count), nil, 0, NI_NUMERICHOST)
-                bcast = String(cString: bBuf)
+            let sa = p.pointee.ifa_addr!
+            if sa.pointee.sa_family == UInt8(AF_INET) {
+                let name = String(cString: p.pointee.ifa_name)
+                if name == "en0" {
+                    var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    getnameinfo(sa, socklen_t(sa.pointee.sa_len),
+                                &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
+                    return String(cString: host)
+                }
             }
-            return (ip, bcast)
+            ptr = p.pointee.ifa_next
         }
         return nil
     }
