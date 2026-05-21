@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Network
 
 struct DLNADevice {
     let id: String
@@ -8,13 +9,20 @@ struct DLNADevice {
     let controlURL: URL
 }
 
-/// Discovers DLNA MediaRenderer devices via SSDP and Samsung TVs via mDNS.
+/// Discovers DLNA MediaRenderer devices via three paths that work without
+/// the com.apple.developer.networking.multicast entitlement:
 ///
-/// Uses a single UDP socket bound to 0.0.0.0:1900 that joins the SSDP
-/// multicast group once.  The same socket both sends M-SEARCH bursts every
-/// 15 s and receives NOTIFY announcements and 200-OK unicast replies.
-/// This avoids the EHOSTUNREACH/double-join problem that arises when two
-/// sockets try to join 239.255.255.250 on the same interface.
+///  1. Passive SSDP NOTIFY listener on port 1900 (receives broadcasts; no send needed).
+///  2. NWBrowser for _samsungtvpresence._tcp and _amzn-wplay._tcp mDNS services.
+///     NWBrowser uses the system mDNSResponder daemon which is exempt from the
+///     multicast entitlement restriction.
+///  3. ARP-cache sweep: reads the kernel ARP table (sysctl RTF_LLINFO) to find
+///     IPs of every device on the LAN, then HTTP-probes Samsung DLNA ports on
+///     each. This is pure TCP unicast — no multicast or broadcast required.
+///
+/// Active M-SEARCH is also attempted but will fail with EHOSTUNREACH on
+/// iOS 14.5+ without the entitlement; the code is retained for the day
+/// the entitlement is added.
 final class DLNADiscovery {
 
     var onUpdate: (([DLNADevice]) -> Void)?
@@ -24,13 +32,11 @@ final class DLNADiscovery {
     private var knownUUIDs:   Set<String>          = []
     private var knownDevices: [String: DLNADevice] = [:]
 
-    // Serial queue for the SSDP socket loop.
     private let ssdpQueue  = DispatchQueue(label: "com.iosmirror.dlna.ssdp",  qos: .utility)
-    // Concurrent queue for HTTP description fetches so they don't stall recv.
     private let fetchQueue = DispatchQueue(label: "com.iosmirror.dlna.fetch",  qos: .utility,
                                            attributes: .concurrent)
 
-    private var mdnsBrowser: SamsungMDNSBrowser?
+    private var mdnsBrowser: SamsungNWBrowser?
 
     private let searchTargets: [String] = [
         "upnp:rootdevice",
@@ -54,20 +60,28 @@ final class DLNADiscovery {
     func start() {
         guard !running else { return }
         running = true
+
+        // Path 1: passive SSDP socket + attempted M-SEARCH
         ssdpQueue.async { [weak self] in self?.runDiscovery() }
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let b = SamsungMDNSBrowser()
+
+            // Path 2: NWBrowser mDNS (works without entitlement via mDNSResponder)
+            let b = SamsungNWBrowser()
             b.onDeviceFound = { [weak self] host in
                 self?.onDebug?("dlna_mdns_found:\(host)")
                 self?.fetchQueue.async {
                     self?.probeSamsungDMR(host: host, port: 7676,
-                                         id: "samsung-\(host)", name: nil, mfr: nil)
+                                         id: "mdns-\(host)", name: nil, mfr: nil)
                 }
             }
             b.start()
             self.mdnsBrowser = b
         }
+
+        // Path 3: ARP sweep — runs once at startup then every 30 s
+        fetchQueue.async { [weak self] in self?.sweepARPHosts() }
     }
 
     func stop() {
@@ -78,7 +92,7 @@ final class DLNADiscovery {
         }
     }
 
-    // MARK: - Single-socket SSDP discovery
+    // MARK: - Path 1: SSDP socket (passive receive + attempted M-SEARCH)
 
     private func runDiscovery() {
         guard let localIPStr = HLSStreamServer.shared.detectLocalIP() else {
@@ -94,9 +108,6 @@ final class DLNADiscovery {
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout<Int32>.size))
 
-        // Bind to INADDR_ANY:1900 so we receive both multicast NOTIFY and
-        // unicast 200-OK replies (some devices reply to port 1900, not our
-        // ephemeral source port).
         var local = sockaddr_in()
         local.sin_family = sa_family_t(AF_INET)
         local.sin_port   = UInt16(1900).bigEndian
@@ -107,18 +118,12 @@ final class DLNADiscovery {
             }
         }) else { onDebug?("dlna_bind_failed:\(errno)"); return }
 
-        // One IP_ADD_MEMBERSHIP establishes both the kernel multicast route
-        // (required for sendto to 239.255.255.250) and multicast receive.
         var mreq = ip_mreq()
         mreq.imr_multiaddr = in_addr(s_addr: inet_addr("239.255.255.250"))
         mreq.imr_interface = in_addr(s_addr: inet_addr(localIPStr))
         let joined = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                                 &mreq, socklen_t(MemoryLayout<ip_mreq>.size)) == 0
 
-        // IP_BOUND_IF (Darwin option 25) locks ALL socket I/O to a specific
-        // interface by index, overriding the routing table.  This is more
-        // reliable than IP_MULTICAST_IF for forcing multicast sends through
-        // WiFi on iOS when multiple interfaces are active.
         var en0Index = if_nametoindex("en0")
         let boundOk = setsockopt(sock, IPPROTO_IP, 25 /* IP_BOUND_IF */,
                                  &en0Index, socklen_t(MemoryLayout<UInt32>.size)) == 0
@@ -126,25 +131,26 @@ final class DLNADiscovery {
         var ttl: UInt8 = 4
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, socklen_t(1))
 
-        onDebug?("dlna_ready:joined=\(joined):bound=\(boundOk):ifindex=\(en0Index)")
+        onDebug?("dlna_ready:joined=\(joined):bound=\(boundOk)")
 
-        // 1-second receive timeout lets the loop also handle periodic M-SEARCH.
         var tv = timeval(tv_sec: 1, tv_usec: 0)
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
-        var seen     = Set<String>()
-        var buf      = [UInt8](repeating: 0, count: 8192)
+        var seen       = Set<String>()
+        var buf        = [UInt8](repeating: 0, count: 8192)
         var lastSearch: Date = .distantPast
 
         while running {
-            // Send M-SEARCH burst every 15 s.
+            // Attempt M-SEARCH — will fail with EHOSTUNREACH without the
+            // com.apple.developer.networking.multicast entitlement, but we
+            // keep it so it works automatically once the entitlement is added.
             if Date().timeIntervalSince(lastSearch) >= 15 {
                 var sent = 0
                 for st in searchTargets {
                     if sendMSearch(sock: sock, st: st) { sent += 1 }
                     Thread.sleep(forTimeInterval: 0.25)
                 }
-                onDebug?("dlna_search_sent:\(sent)")
+                if sent > 0 { onDebug?("dlna_search_sent:\(sent)") }
                 lastSearch = Date()
             }
 
@@ -175,8 +181,61 @@ final class DLNADiscovery {
                        socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        if sent < 0 { onDebug?("dlna_sendto_errno:\(errno)") }
         return sent == bytes.count
+    }
+
+    // MARK: - Path 3: ARP cache sweep
+
+    /// Reads the kernel ARP table (no network I/O, no entitlement required) and
+    /// probes Samsung DLNA ports on every discovered IP.  Repeats every 30 s.
+    private func sweepARPHosts() {
+        guard running else { return }
+        let hosts = readARPTable()
+        onDebug?("dlna_arp_sweep:\(hosts.count)_hosts")
+        for ip in hosts {
+            guard running else { return }
+            probeSamsungDMR(host: ip, port: 7676, id: "arp-\(ip)", name: nil, mfr: nil)
+        }
+        // Repeat after 30 s so newly powered-on TVs are caught.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) { [weak self] in
+            self?.sweepARPHosts()
+        }
+    }
+
+    /// Reads the kernel ARP cache via sysctl.  Returns IPv4 addresses of all
+    /// neighbours visible on the local network — no multicast, no broadcast,
+    /// no special entitlement required.
+    private func readARPTable() -> [String] {
+        // CTL_NET / PF_ROUTE / 0 / AF_INET / NET_RT_FLAGS / RTF_LLINFO
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO]
+        var needed = 0
+        guard sysctl(&mib, 6, nil, &needed, nil, 0) == 0, needed > 0 else { return [] }
+        var buf = [UInt8](repeating: 0, count: needed)
+        guard sysctl(&mib, 6, &buf, &needed, nil, 0) == 0 else { return [] }
+
+        var ips: [String] = []
+        var offset = 0
+        let rtmSize = MemoryLayout<rt_msghdr>.size
+
+        while offset + rtmSize <= needed {
+            // rtm_msglen is the first u_short (little-endian on ARM)
+            let msgLen = Int(buf[offset]) | (Int(buf[offset + 1]) << 8)
+            guard msgLen >= rtmSize, offset + msgLen <= needed else { break }
+
+            // sockaddr_inarp (layout-compatible with sockaddr_in for the IP part)
+            // immediately follows rt_msghdr.
+            // Offsets within sockaddr: [0]=sa_len, [1]=sa_family, [2-3]=sin_port,
+            //                          [4-7]=sin_addr (network byte order = big-endian)
+            let saOff = offset + rtmSize
+            if saOff + 8 <= needed, buf[saOff + 1] == UInt8(AF_INET) {
+                let ip = "\(buf[saOff+4]).\(buf[saOff+5]).\(buf[saOff+6]).\(buf[saOff+7])"
+                if buf[saOff + 4] != 0 && !ips.contains(ip) {
+                    ips.append(ip)
+                }
+            }
+            offset += msgLen
+        }
+        return ips
     }
 
     // MARK: - SSDP message handling
@@ -195,10 +254,8 @@ final class DLNADiscovery {
                 usn = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
             }
         }
-
         let firstLine = lines.first ?? ""
         onDebug?("dlna_pkt:\(firstLine.prefix(50)):loc=\(location ?? "nil")")
-
         guard let loc = location else { return }
         let rawUSN = usn ?? loc
         let uuid   = deviceUUID(from: rawUSN)
@@ -220,17 +277,16 @@ final class DLNADiscovery {
     // MARK: - Device description fetch and register
 
     private func fetchAndRegister(from url: URL, id: String) {
+        var req = URLRequest(url: url, timeoutInterval: 5)
         let sem = DispatchSemaphore(value: 0)
         var data: Data?
-        URLSession.shared.dataTask(with: url) { d, _, _ in data = d; sem.signal() }.resume()
+        URLSession.shared.dataTask(with: req) { d, _, _ in data = d; sem.signal() }.resume()
         sem.wait()
         guard let data, let xml = String(data: data, encoding: .utf8) else {
             onDebug?("dlna_fetch_failed:\(url.host ?? "?")"); return
         }
-
         let result = DescriptionParser(xml: xml, baseURL: url, id: id).parseResult()
         let label  = "\(result.friendlyName.isEmpty ? "?" : result.friendlyName) [\(result.shortType)]"
-
         if let controlURL = result.controlURL {
             onDebug?("dlna_added:\(label)")
             let device = DLNADevice(id: id, name: result.friendlyName,
@@ -255,10 +311,10 @@ final class DLNADiscovery {
     private func probeSamsungDMR(host: String, port: Int, id: String,
                                   name: String?, mfr: String?) {
         guard knownDevices[id] == nil else { return }
-
         for (probePort, probePath) in samsungDMRProbes {
+            guard running else { return }
             guard let url = URL(string: "http://\(host):\(probePort)\(probePath)") else { continue }
-            let req = URLRequest(url: url, timeoutInterval: 3)
+            let req = URLRequest(url: url, timeoutInterval: 2)
             let sem = DispatchSemaphore(value: 0)
             var hit: (Data, URL)?
             URLSession.shared.dataTask(with: req) { d, resp, _ in
@@ -266,69 +322,90 @@ final class DLNADiscovery {
                 sem.signal()
             }.resume()
             sem.wait()
-
-            if let (data, baseURL) = hit, let xml = String(data: data, encoding: .utf8) {
-                let result = DescriptionParser(xml: xml, baseURL: baseURL, id: id).parseResult()
-                if let controlURL = result.controlURL {
-                    let displayName = name ?? result.friendlyName
-                    let displayMfr  = mfr  ?? result.manufacturer
-                    onDebug?("dlna_samsung_dmr_added:\(displayName):\(host):\(probePort)\(probePath)")
-                    let device = DLNADevice(id: id, name: displayName,
-                                           manufacturer: displayMfr, controlURL: controlURL)
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        self.knownDevices[id] = device
-                        self.onUpdate?(Array(self.knownDevices.values))
-                    }
-                    return
+            guard let (data, baseURL) = hit,
+                  let xml = String(data: data, encoding: .utf8) else { continue }
+            let result = DescriptionParser(xml: xml, baseURL: baseURL, id: id).parseResult()
+            if let controlURL = result.controlURL {
+                let displayName = name ?? result.friendlyName
+                let displayMfr  = mfr  ?? result.manufacturer
+                onDebug?("dlna_samsung_added:\(displayName):\(host):\(probePort)\(probePath)")
+                let device = DLNADevice(id: id, name: displayName,
+                                       manufacturer: displayMfr, controlURL: controlURL)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.knownDevices[id] = device
+                    self.onUpdate?(Array(self.knownDevices.values))
                 }
-                onDebug?("dlna_samsung_probe_no_avt:\(host):\(probePort)\(probePath)")
+                return
             }
         }
-        onDebug?("dlna_samsung_probe_exhausted:\(host)")
+        // Only log exhaustion if we got at least one HTTP response (host exists but no DLNA)
+        onDebug?("dlna_probe_no_avt:\(host)")
     }
 }
 
-// MARK: - Samsung SmartHub mDNS browser
+// MARK: - NWBrowser-based Samsung TV mDNS discovery
 
-private final class SamsungMDNSBrowser: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
+/// Uses NWBrowser (backed by the system mDNSResponder daemon) to browse for
+/// Samsung TV mDNS services.  This works without the multicast entitlement
+/// because the system daemon handles all multicast sends on the app's behalf.
+private final class SamsungNWBrowser {
     var onDeviceFound: ((String) -> Void)?
-    private let browser  = NetServiceBrowser()
-    private var pending: [NetService] = []
+
+    private var browsers:    [NWBrowser]    = []
+    private var connections: [NWConnection] = []
+
+    private let serviceTypes = [
+        "_samsungtvpresence._tcp",
+        "_amzn-wplay._tcp",
+    ]
 
     func start() {
-        browser.delegate = self
-        browser.searchForServices(ofType: "_samsungtvpresence._tcp", inDomain: "local.")
-    }
-
-    func stop() { browser.stop(); pending.forEach { $0.stop() }; pending = [] }
-
-    func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService,
-                           moreComing: Bool) {
-        pending.append(service); service.delegate = self; service.resolve(withTimeout: 5)
-    }
-
-    func netServiceDidResolveAddress(_ sender: NetService) {
-        if let ip = ipv4Address(from: sender) { onDeviceFound?(ip) }
-        pending.removeAll { $0 === sender }
-    }
-
-    func netServiceBrowser(_ browser: NetServiceBrowser,
-                           didNotSearch errorDict: [String: NSNumber]) {}
-
-    private func ipv4Address(from service: NetService) -> String? {
-        guard let addresses = service.addresses else { return nil }
-        for data in addresses {
-            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            let ok = data.withUnsafeBytes { ptr -> Bool in
-                guard let addr = ptr.bindMemory(to: sockaddr.self).baseAddress else { return false }
-                guard addr.pointee.sa_family == sa_family_t(AF_INET) else { return false }
-                return getnameinfo(addr, socklen_t(data.count), &host, socklen_t(host.count),
-                                   nil, 0, NI_NUMERICHOST) == 0
+        for type in serviceTypes {
+            let b = NWBrowser(
+                for: .bonjour(type: type, domain: "local"),
+                using: NWParameters()
+            )
+            b.browseResultsChangedHandler = { [weak self] _, changes in
+                for change in changes {
+                    if case .added(let result) = change {
+                        self?.resolve(endpoint: result.endpoint)
+                    }
+                }
             }
-            if ok { return String(cString: host) }
+            b.stateUpdateHandler = { _ in }
+            b.start(queue: .main)
+            browsers.append(b)
         }
-        return nil
+    }
+
+    func stop() {
+        browsers.forEach    { $0.cancel() }
+        connections.forEach { $0.cancel() }
+        browsers.removeAll()
+        connections.removeAll()
+    }
+
+    private func resolve(endpoint: NWEndpoint) {
+        // Open a TCP connection to the Bonjour endpoint — this triggers mDNS
+        // resolution through the system daemon and gives us the remote IP once ready.
+        let conn = NWConnection(to: endpoint, using: .tcp)
+        connections.append(conn)
+        conn.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                if let path   = conn.currentPath,
+                   case .hostPort(let host, _) = path.remoteEndpoint {
+                    let ip = "\(host)"   // NWEndpoint.Host is CustomStringConvertible
+                    if !ip.isEmpty { self?.onDeviceFound?(ip) }
+                }
+                conn.cancel()
+            case .failed, .cancelled:
+                self?.connections.removeAll { $0 === conn }
+            default: break
+            }
+        }
+        conn.start(queue: .main)
     }
 }
 
