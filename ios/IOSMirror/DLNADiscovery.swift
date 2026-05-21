@@ -115,14 +115,18 @@ final class DLNADiscovery {
         let joined = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                                 &mreq, socklen_t(MemoryLayout<ip_mreq>.size)) == 0
 
-        // Force outbound multicast through the WiFi interface.
-        var mcastIf = in_addr(s_addr: inet_addr(localIPStr))
-        setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,
-                   &mcastIf, socklen_t(MemoryLayout<in_addr>.size))
+        // IP_BOUND_IF (Darwin option 25) locks ALL socket I/O to a specific
+        // interface by index, overriding the routing table.  This is more
+        // reliable than IP_MULTICAST_IF for forcing multicast sends through
+        // WiFi on iOS when multiple interfaces are active.
+        var en0Index = if_nametoindex("en0")
+        let boundOk = setsockopt(sock, IPPROTO_IP, 25 /* IP_BOUND_IF */,
+                                 &en0Index, socklen_t(MemoryLayout<UInt32>.size)) == 0
+
         var ttl: UInt8 = 4
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, socklen_t(1))
 
-        onDebug?("dlna_ready:joined=\(joined)")
+        onDebug?("dlna_ready:joined=\(joined):bound=\(boundOk):ifindex=\(en0Index)")
 
         // 1-second receive timeout lets the loop also handle periodic M-SEARCH.
         var tv = timeval(tv_sec: 1, tv_usec: 0)
