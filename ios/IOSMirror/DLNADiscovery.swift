@@ -125,7 +125,16 @@ final class DLNADiscovery {
                               &mcastIf, socklen_t(MemoryLayout<in_addr>.size)) == 0
         var ttl: UInt8 = 4
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, socklen_t(1))
-        onDebug?("dlna_search_mcastif:\(ifOk)")
+
+        // iOS requires joining the multicast group even on a send-only socket
+        // to populate the kernel multicast route; without this sendto returns
+        // EHOSTUNREACH (65) regardless of IP_MULTICAST_IF being set.
+        var mreq = ip_mreq()
+        mreq.imr_multiaddr = in_addr(s_addr: inet_addr("239.255.255.250"))
+        mreq.imr_interface = in_addr(s_addr: inet_addr(localIPStr))
+        let joinOk = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                                &mreq, socklen_t(MemoryLayout<ip_mreq>.size)) == 0
+        onDebug?("dlna_search_mcastif:\(ifOk):join:\(joinOk)")
         var tv = timeval(tv_sec: 10, tv_usec: 0)
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
