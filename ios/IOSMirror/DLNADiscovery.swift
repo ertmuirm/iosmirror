@@ -189,22 +189,38 @@ final class DLNADiscovery {
         return sent == bytes.count
     }
 
-    // MARK: - Path 3: ARP cache sweep
+    // MARK: - Path 3: ARP cache sweep + full subnet scan
 
-    /// Reads the kernel ARP cache, sends unicast SSDP M-SEARCH to each IP,
-    /// then falls back to Samsung HTTP port probes.  Repeats every 30 s.
+    /// Scans the full /24 subnet(s) visible on the network via unicast SSDP,
+    /// then falls back to Samsung HTTP port probes on known-alive ARP hosts.
+    /// Repeats every 30 s.
     private func sweepARPHosts() {
         guard running else { return }
-        let hosts = readARPTable()
-        onDebug?("dlna_arp_sweep:\(hosts.count)_hosts")
+        guard let localIP = HLSStreamServer.shared.detectLocalIP() else {
+            onDebug?("dlna_no_wifi_ip"); return
+        }
+        let arpHosts = readARPTable()
+        onDebug?("dlna_arp_sweep:\(arpHosts.count)_hosts")
 
-        // Phase 1: unicast SSDP — sends M-SEARCH directly to each IP:1900 and
-        // collects responses. Unicast UDP to a specific IP needs no entitlement.
-        unicastSSDPScan(hosts: hosts)
+        // Build the full set of IPs to probe via unicast SSDP:
+        // - All 254 addresses in each /24 subnet represented by an ARP host or the local IP.
+        // This ensures we reach TVs that are not yet in the ARP cache.
+        var prefixes = Set<String>()
+        prefixes.insert(subnetPrefix(localIP))
+        for ip in arpHosts { prefixes.insert(subnetPrefix(ip)) }
+        prefixes = prefixes.filter { !$0.isEmpty }
+        var subnetHosts = Set<String>(arpHosts)
+        for prefix in prefixes {
+            for i in 1...254 { subnetHosts.insert("\(prefix).\(i)") }
+        }
+        let allScanHosts = Array(subnetHosts)
+        onDebug?("dlna_subnet_scan:\(allScanHosts.count)_ips:\(prefixes.count)_subnets")
 
-        // Phase 2: Samsung HTTP port probes for TVs that don't respond to SSDP.
-        // Dispatch each host as a separate concurrent task (not sequential blocking).
-        for ip in hosts {
+        // Phase 1: unicast SSDP to every IP in the subnet(s) — fast (UDP, no entitlement).
+        unicastSSDPScan(hosts: allScanHosts)
+
+        // Phase 2: Samsung HTTP port probes on ARP hosts only (known alive; HTTP is expensive).
+        for ip in arpHosts {
             guard running else { return }
             fetchQueue.async { [weak self] in
                 self?.probeSamsungDMR(host: ip, port: 7676, id: "arp-\(ip)", name: nil, mfr: nil)
@@ -214,6 +230,12 @@ final class DLNADiscovery {
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) { [weak self] in
             self?.sweepARPHosts()
         }
+    }
+
+    private func subnetPrefix(_ ip: String) -> String {
+        let p = ip.components(separatedBy: ".")
+        guard p.count == 4 else { return "" }
+        return "\(p[0]).\(p[1]).\(p[2])"
     }
 
     /// Sends unicast UDP M-SEARCH to port 1900 on every ARP host, then waits
