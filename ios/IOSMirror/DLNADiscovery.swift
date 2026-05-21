@@ -84,7 +84,8 @@ final class DLNADiscovery {
         guard let localIPStr = HLSStreamServer.shared.detectLocalIP() else {
             onDebug?("dlna_no_wifi_ip"); return
         }
-        onDebug?("dlna_discovery_start:\(localIPStr)")
+        let broadcastStr = HLSStreamServer.shared.detectBroadcastAddress() ?? "255.255.255.255"
+        onDebug?("dlna_discovery_start:\(localIPStr):bcast=\(broadcastStr)")
 
         let sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard sock >= 0 else { onDebug?("dlna_socket_failed:\(errno)"); return }
@@ -128,6 +129,11 @@ final class DLNADiscovery {
 
         onDebug?("dlna_ready:joined=\(joined):bound=\(boundOk):ifindex=\(en0Index)")
 
+        // SO_BROADCAST allows sendto() to subnet broadcast addresses.
+        var bcastEnable: Int32 = 1
+        setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &bcastEnable,
+                   socklen_t(MemoryLayout<Int32>.size))
+
         // 1-second receive timeout lets the loop also handle periodic M-SEARCH.
         var tv = timeval(tv_sec: 1, tv_usec: 0)
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
@@ -137,14 +143,18 @@ final class DLNADiscovery {
         var lastSearch: Date = .distantPast
 
         while running {
-            // Send M-SEARCH burst every 15 s.
+            // Send M-SEARCH burst every 15 s — multicast AND subnet broadcast.
+            // iOS blocks multicast sends without a special entitlement; the
+            // broadcast send uses normal unicast routing and works on all iOS
+            // versions. Most DLNA devices respond to both.
             if Date().timeIntervalSince(lastSearch) >= 15 {
-                var sent = 0
+                var mcastSent = 0, bcastSent = 0
                 for st in searchTargets {
-                    if sendMSearch(sock: sock, st: st) { sent += 1 }
+                    if sendMSearch(sock: sock, dest: "239.255.255.250", st: st) { mcastSent += 1 }
+                    if sendMSearch(sock: sock, dest: broadcastStr,      st: st) { bcastSent += 1 }
                     Thread.sleep(forTimeInterval: 0.25)
                 }
-                onDebug?("dlna_search_sent:\(sent)")
+                onDebug?("dlna_search_sent:mcast=\(mcastSent):bcast=\(bcastSent)")
                 lastSearch = Date()
             }
 
@@ -162,20 +172,20 @@ final class DLNADiscovery {
                    &mreq, socklen_t(MemoryLayout<ip_mreq>.size))
     }
 
-    private func sendMSearch(sock: Int32, st: String) -> Bool {
+    private func sendMSearch(sock: Int32, dest destIP: String, st: String) -> Bool {
         let msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 5\r\nST: \(st)\r\n\r\n"
         var bytes = Array(msg.utf8)
         var dest  = sockaddr_in()
         dest.sin_family = sa_family_t(AF_INET)
         dest.sin_port   = UInt16(1900).bigEndian
-        dest.sin_addr   = in_addr(s_addr: inet_addr("239.255.255.250"))
+        dest.sin_addr   = in_addr(s_addr: inet_addr(destIP))
         let sent: Int = withUnsafePointer(to: &dest) { ptr -> Int in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp -> Int in
                 sendto(sock, &bytes, bytes.count, 0, sp,
                        socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        if sent < 0 { onDebug?("dlna_sendto_errno:\(errno)") }
+        if sent < 0 { onDebug?("dlna_sendto_\(destIP.hasPrefix("239") ? "mcast" : "bcast")_errno:\(errno)") }
         return sent == bytes.count
     }
 
