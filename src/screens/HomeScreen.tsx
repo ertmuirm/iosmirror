@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
   debugBox: {
     backgroundColor: '#111111',
     borderRadius: 8,
-    maxHeight: 180,
+    maxHeight: 300,
     marginBottom: 14,
   },
   debugContent: {

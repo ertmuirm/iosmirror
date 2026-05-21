@@ -34,7 +34,7 @@ export function useMirrorBridge() {
         setScanning(false);
       }),
       mirrorEmitter.addListener('onDebug', (msg: string) => {
-        setDebugLog(prev => [...prev.slice(-9), msg]);
+        setDebugLog(prev => [...prev.slice(-49), msg]);
       }),
     ];
 

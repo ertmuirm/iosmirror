@@ -216,7 +216,9 @@ final class DLNADiscovery {
             if n <= 0 { continue }
             buf[Int(n)] = 0
             let msg = String(bytes: buf[0..<Int(n)], encoding: .utf8) ?? ""
-            if msg.contains("ssdp:alive") {
+            // Accept any NOTIFY, not just ssdp:alive — some firmware sends
+            // ssdp:update or omits the NTS value entirely.
+            if msg.uppercased().hasPrefix("NOTIFY") || msg.contains("ssdp:alive") {
                 handleSSDPMessage(msg, localSeen: &seen, source: "notify")
             }
         }
@@ -227,23 +229,40 @@ final class DLNADiscovery {
     // MARK: - SSDP message handling
 
     private func handleSSDPMessage(_ msg: String, localSeen: inout Set<String>, source: String) {
+        // Samsung TVs sometimes use bare \n instead of \r\n.
+        let lines = msg.components(separatedBy: "\r\n").flatMap {
+            $0.components(separatedBy: "\n")
+        }
         var location: String?
         var usn: String?
-        for line in msg.components(separatedBy: "\r\n") {
+        var nt: String?
+        for line in lines {
             let lower = line.lowercased()
             if lower.hasPrefix("location:") {
                 location = String(line.dropFirst(9)).trimmingCharacters(in: .whitespaces)
             } else if lower.hasPrefix("usn:") {
                 usn = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            } else if lower.hasPrefix("nt:") {
+                nt = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
             }
         }
-        guard let loc = location, let rawUSN = usn else { return }
+
+        // Log every distinct packet so we can see the TV is actually responding.
+        let firstLine = lines.first ?? ""
+        onDebug?("dlna_\(source)_pkt:\(firstLine.prefix(60)):loc=\(location ?? "nil"):usn=\(usn?.prefix(20) ?? "nil")")
+
+        guard let loc = location else { return }
+        // USN is optional — fall back to location as the dedup key for unusual devices.
+        let rawUSN = usn ?? loc
         let uuid = deviceUUID(from: rawUSN)
         guard !localSeen.contains(loc), !knownUUIDs.contains(uuid) else { return }
         localSeen.insert(loc)
         knownUUIDs.insert(uuid)
         onDebug?("dlna_\(source)_hit:\(uuid.prefix(8)):\(loc)")
-        guard let url = URL(string: loc) else { return }
+        guard let url = URL(string: loc) else {
+            onDebug?("dlna_\(source)_bad_url:\(loc)")
+            return
+        }
         fetchAndRegister(from: url, id: uuid)
     }
 
