@@ -49,10 +49,15 @@ final class DLNADiscovery {
     private let samsungDMRProbes: [(port: Int, path: String)] = [
         (7676,  "/dmr/SamsungMRDesc.xml"),
         (7676,  "/MediaRenderer.xml"),
+        (7676,  "/upnp/0/getDescription"),
+        (7676,  "/"),
         (52235, "/dmr/SamsungMRDesc.xml"),
         (52235, "/MediaRenderer.xml"),
+        (52235, "/"),
         (55001, "/MainTVServer2desc.xml"),
-        (7676,  "/"),
+        (8080,  "/upnp/0/getDescription"),
+        (8080,  "/samsungMobile/DeviceDesc.xml"),
+        (8080,  "/"),
     ]
 
     // MARK: - Lifecycle
@@ -186,19 +191,84 @@ final class DLNADiscovery {
 
     // MARK: - Path 3: ARP cache sweep
 
-    /// Reads the kernel ARP table (no network I/O, no entitlement required) and
-    /// probes Samsung DLNA ports on every discovered IP.  Repeats every 30 s.
+    /// Reads the kernel ARP cache, sends unicast SSDP M-SEARCH to each IP,
+    /// then falls back to Samsung HTTP port probes.  Repeats every 30 s.
     private func sweepARPHosts() {
         guard running else { return }
         let hosts = readARPTable()
         onDebug?("dlna_arp_sweep:\(hosts.count)_hosts")
+
+        // Phase 1: unicast SSDP — sends M-SEARCH directly to each IP:1900 and
+        // collects responses. Unicast UDP to a specific IP needs no entitlement.
+        unicastSSDPScan(hosts: hosts)
+
+        // Phase 2: Samsung HTTP port probes for TVs that don't respond to SSDP.
+        // Dispatch each host as a separate concurrent task (not sequential blocking).
         for ip in hosts {
             guard running else { return }
-            probeSamsungDMR(host: ip, port: 7676, id: "arp-\(ip)", name: nil, mfr: nil)
+            fetchQueue.async { [weak self] in
+                self?.probeSamsungDMR(host: ip, port: 7676, id: "arp-\(ip)", name: nil, mfr: nil)
+            }
         }
-        // Repeat after 30 s so newly powered-on TVs are caught.
+
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) { [weak self] in
             self?.sweepARPHosts()
+        }
+    }
+
+    /// Sends unicast UDP M-SEARCH to port 1900 on every ARP host, then waits
+    /// up to 5 s for UPnP responses.  Unicast UDP to a specific IP does not
+    /// require the com.apple.developer.networking.multicast entitlement.
+    private func unicastSSDPScan(hosts: [String]) {
+        guard !hosts.isEmpty else { return }
+        let sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard sock >= 0 else { return }
+        defer { Darwin.close(sock) }
+
+        var local = sockaddr_in()
+        local.sin_family = sa_family_t(AF_INET)
+        local.sin_port   = 0
+        local.sin_addr   = in_addr(s_addr: INADDR_ANY)
+        guard withUnsafePointer(to: &local, {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }) else { onDebug?("dlna_unicast_bind_failed:\(errno)"); return }
+
+        // Send M-SEARCH to every host quickly before waiting for replies.
+        for ip in hosts {
+            let msg = "M-SEARCH * HTTP/1.1\r\nHOST: \(ip):1900\r\nMAN: \"ssdp:discover\"\r\nMX: 3\r\nST: ssdp:all\r\n\r\n"
+            var bytes = Array(msg.utf8)
+            var dest  = sockaddr_in()
+            dest.sin_family = sa_family_t(AF_INET)
+            dest.sin_port   = UInt16(1900).bigEndian
+            dest.sin_addr   = in_addr(s_addr: inet_addr(ip))
+            withUnsafePointer(to: &dest) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
+                    sendto(sock, &bytes, bytes.count, 0, sp,
+                           socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+        }
+        onDebug?("dlna_unicast_scan:\(hosts.count)")
+
+        // Collect responses for up to 5 s; use a short per-recv timeout so we
+        // can re-check the deadline and running flag between each call.
+        var tv = timeval(tv_sec: 0, tv_usec: 200_000)
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv,
+                   socklen_t(MemoryLayout<timeval>.size))
+        var seen = Set<String>()
+        var buf  = [UInt8](repeating: 0, count: 8192)
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline && running {
+            let n = recv(sock, &buf, buf.count - 1, 0)
+            guard n > 0 else { continue }
+            buf[Int(n)] = 0
+            let msg = String(bytes: buf[0..<Int(n)], encoding: .utf8) ?? ""
+            let up  = msg.uppercased()
+            if up.hasPrefix("HTTP/1.1 200") || msg.contains("ssdp:alive") {
+                handleSSDPMessage(msg, localSeen: &seen)
+            }
         }
     }
 
@@ -311,6 +381,7 @@ final class DLNADiscovery {
     private func probeSamsungDMR(host: String, port: Int, id: String,
                                   name: String?, mfr: String?) {
         guard knownDevices[id] == nil else { return }
+        var gotAnyHTTPResponse = false
         for (probePort, probePath) in samsungDMRProbes {
             guard running else { return }
             guard let url = URL(string: "http://\(host):\(probePort)\(probePath)") else { continue }
@@ -318,6 +389,7 @@ final class DLNADiscovery {
             let sem = DispatchSemaphore(value: 0)
             var hit: (Data, URL)?
             URLSession.shared.dataTask(with: req) { d, resp, _ in
+                if resp != nil { gotAnyHTTPResponse = true }
                 if let d, (resp as? HTTPURLResponse)?.statusCode == 200 { hit = (d, url) }
                 sem.signal()
             }.resume()
@@ -339,8 +411,8 @@ final class DLNADiscovery {
                 return
             }
         }
-        // Only log exhaustion if we got at least one HTTP response (host exists but no DLNA)
-        onDebug?("dlna_probe_no_avt:\(host)")
+        // Only log when the host responded over HTTP but had no DLNA AVTransport.
+        if gotAnyHTTPResponse { onDebug?("dlna_probe_no_avt:\(host)") }
     }
 }
 
@@ -357,6 +429,7 @@ private final class SamsungNWBrowser {
 
     private let serviceTypes = [
         "_samsungtvpresence._tcp",
+        "_samsungsmarthome._tcp",
         "_amzn-wplay._tcp",
     ]
 
