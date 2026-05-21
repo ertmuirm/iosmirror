@@ -121,9 +121,11 @@ final class DLNADiscovery {
         }) else { onDebug?("dlna_bind_failed:\(errno)"); return }
 
         var mcastIf = in_addr(s_addr: inet_addr(localIPStr))
-        setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &mcastIf, socklen_t(MemoryLayout<in_addr>.size))
+        let ifOk = setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,
+                              &mcastIf, socklen_t(MemoryLayout<in_addr>.size)) == 0
         var ttl: UInt8 = 4
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, socklen_t(1))
+        onDebug?("dlna_search_mcastif:\(ifOk)")
         var tv = timeval(tv_sec: 10, tv_usec: 0)
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
@@ -151,20 +153,19 @@ final class DLNADiscovery {
     @discardableResult
     private func sendMSearch(sock: Int32, st: String) -> Bool {
         let msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 5\r\nST: \(st)\r\n\r\n"
-        guard let data = msg.data(using: .utf8) else { return false }
+        var bytes = Array(msg.utf8)
         var dest = sockaddr_in()
         dest.sin_family = sa_family_t(AF_INET)
         dest.sin_port   = UInt16(1900).bigEndian
         dest.sin_addr   = in_addr(s_addr: inet_addr("239.255.255.250"))
-        let n = data.withUnsafeBytes { bytes in
-            withUnsafePointer(to: &dest) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    sendto(sock, bytes.baseAddress, bytes.count, 0, $0,
-                           socklen_t(MemoryLayout<sockaddr_in>.size))
-                }
+        let sent: Int = withUnsafePointer(to: &dest) { ptr -> Int in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr -> Int in
+                sendto(sock, &bytes, bytes.count, 0, sockPtr,
+                       socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        return n == data.count
+        if sent < 0 { onDebug?("dlna_sendto_errno:\(errno)") }
+        return sent == bytes.count
     }
 
     // MARK: - Passive NOTIFY listener
