@@ -105,28 +105,20 @@ final class DLNADiscovery {
 
         var yes: Int32 = 1
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
-        setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout<Int32>.size))
 
-        // Try binding to port 1900 first — some Samsung TVs only unicast replies
-        // back to source port 1900.  Fall back to ephemeral port if 1900 is taken.
+        // Use an ephemeral source port — binding to 1900 causes sendto() to fail
+        // on iOS (EACCES) when the NOTIFY listener already holds 0.0.0.0:1900.
+        // The NOTIFY listener on port 1900 will catch any unicast 200 OK replies
+        // that the TV sends back to port 1900.
         var local = sockaddr_in()
         local.sin_family = sa_family_t(AF_INET)
-        local.sin_port   = UInt16(1900).bigEndian
+        local.sin_port   = 0
         local.sin_addr   = in_addr(s_addr: inet_addr(localIPStr))
-        let bound1900 = withUnsafePointer(to: &local, {
+        guard withUnsafePointer(to: &local, {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
             }
-        })
-        if !bound1900 {
-            local.sin_port = 0
-            guard withUnsafePointer(to: &local, {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
-                }
-            }) else { onDebug?("dlna_bind_failed:\(errno)"); return }
-        }
-        onDebug?("dlna_search_bound_port1900:\(bound1900)")
+        }) else { onDebug?("dlna_bind_failed:\(errno)"); return }
 
         var mcastIf = in_addr(s_addr: inet_addr(localIPStr))
         setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &mcastIf, socklen_t(MemoryLayout<in_addr>.size))
@@ -216,9 +208,11 @@ final class DLNADiscovery {
             if n <= 0 { continue }
             buf[Int(n)] = 0
             let msg = String(bytes: buf[0..<Int(n)], encoding: .utf8) ?? ""
-            // Accept any NOTIFY, not just ssdp:alive — some firmware sends
-            // ssdp:update or omits the NTS value entirely.
-            if msg.uppercased().hasPrefix("NOTIFY") || msg.contains("ssdp:alive") {
+            // Accept NOTIFY announcements AND 200 OK unicast replies — Samsung
+            // TVs sometimes unicast M-SEARCH replies back to port 1900 instead
+            // of our ephemeral source port.
+            let up = msg.uppercased()
+            if up.hasPrefix("NOTIFY") || up.hasPrefix("HTTP/1.1 200") || msg.contains("ssdp:alive") {
                 handleSSDPMessage(msg, localSeen: &seen, source: "notify")
             }
         }
