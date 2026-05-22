@@ -38,6 +38,12 @@ final class DLNADiscovery {
 
     private var mdnsBrowser: SamsungNWBrowser?
 
+    // Subnets (/24 prefixes like "172.20.14") where DLNA devices have been found.
+    // Persisted across app launches so discovered subnets are always rescanned
+    // even when their ARP entries have expired.
+    private let persistedSubnetKey = "dlna.persistedSubnets.v1"
+    private var persistedSubnets: Set<String> = []
+
     private let searchTargets: [String] = [
         "upnp:rootdevice",
         "urn:schemas-upnp-org:device:MediaRenderer:1",
@@ -69,6 +75,11 @@ final class DLNADiscovery {
     func start() {
         guard !running else { return }
         running = true
+
+        // Load subnets where DLNA devices were found in previous sessions.
+        let saved = UserDefaults.standard.stringArray(forKey: persistedSubnetKey) ?? []
+        persistedSubnets = Set(saved)
+        if !saved.isEmpty { onDebug?("dlna_cached_subnets:\(saved.count)") }
 
         // Path 1: passive SSDP socket + attempted M-SEARCH
         ssdpQueue.async { [weak self] in self?.runDiscovery() }
@@ -207,11 +218,12 @@ final class DLNADiscovery {
         onDebug?("dlna_arp_sweep:\(arpHosts.count)_hosts")
 
         // Build the full set of IPs to probe via unicast SSDP:
-        // - All 254 addresses in each /24 subnet represented by an ARP host or the local IP.
-        // This ensures we reach TVs that are not yet in the ARP cache.
+        // - All 254 addresses in each /24 derived from ARP, the local IP, and any subnet
+        //   where a DLNA device was previously found (persisted across app launches).
         var prefixes = Set<String>()
         prefixes.insert(subnetPrefix(localIP))
         for ip in arpHosts { prefixes.insert(subnetPrefix(ip)) }
+        prefixes.formUnion(persistedSubnets)   // always rescan subnets with known DLNA devices
         prefixes = prefixes.filter { !$0.isEmpty }
         var subnetHosts = Set<String>(arpHosts)
         for prefix in prefixes {
@@ -240,6 +252,15 @@ final class DLNADiscovery {
         let p = ip.components(separatedBy: ".")
         guard p.count == 4 else { return "" }
         return "\(p[0]).\(p[1]).\(p[2])"
+    }
+
+    /// Saves the /24 prefix of `ip` to UserDefaults so future scans always
+    /// include this subnet even if the ARP cache no longer has entries for it.
+    private func persistSubnet(of ip: String) {
+        let prefix = subnetPrefix(ip)
+        guard !prefix.isEmpty, !persistedSubnets.contains(prefix) else { return }
+        persistedSubnets.insert(prefix)
+        UserDefaults.standard.set(Array(persistedSubnets), forKey: persistedSubnetKey)
     }
 
     /// Sends unicast UDP M-SEARCH to port 1900 on every ARP host, then waits
@@ -394,26 +415,25 @@ final class DLNADiscovery {
             // proprietary description may also have AVTransport but its controlURL
             // resolves to the wrong port (e.g. 9119 instead of 7676/7678).
             let isMediaRenderer = result.deviceType.lowercased().contains("mediarenderer")
-            let host = url.host ?? "?"
-            let port = url.port ?? 0
-            onDebug?("dlna_added:\(label):\(host):\(port):renderer=\(isMediaRenderer)")
+            let devHost = url.host ?? "?"
+            let devPort = url.port ?? 0
+            onDebug?("dlna_added:\(label):\(devHost):\(devPort):renderer=\(isMediaRenderer)")
             let device = DLNADevice(id: id, name: result.friendlyName,
                                     manufacturer: result.manufacturer,
                                     controlURL: controlURL)
+            if let ip = url.host { persistSubnet(of: ip) }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                let alreadyHaveRenderer = self.knownUUIDs.contains(id)
-                if !alreadyHaveRenderer {
+                // Always register — a later MediaRenderer response will overwrite a
+                // non-renderer that registered first with the wrong port.
+                // Once a MediaRenderer is confirmed, lock its UUID to block further
+                // SSDP responses (the correct controlURL is now established).
+                let alreadyLockedIn = self.knownUUIDs.contains(id)
+                if !alreadyLockedIn {
                     self.knownDevices[id] = device
                     self.onUpdate?(Array(self.knownDevices.values))
+                    if isMediaRenderer { self.knownUUIDs.insert(id) }
                 }
-                if isMediaRenderer {
-                    // Lock in this registration; subsequent SSDP responses for this
-                    // UUID are now blocked (we have the authoritative renderer URL).
-                    self.knownUUIDs.insert(id)
-                }
-                // Non-renderer: device registered temporarily but knownUUIDs not set,
-                // so a later MediaRenderer response can still override it.
             }
         } else if result.isSamsung, let host = url.host {
             onDebug?("dlna_samsung_no_avt:\(label):\(host):\(url.port ?? 0):probing_dmr")
@@ -451,6 +471,7 @@ final class DLNADiscovery {
                 onDebug?("dlna_samsung_added:\(displayName):\(host):\(probePort)\(probePath)")
                 let device = DLNADevice(id: id, name: displayName,
                                        manufacturer: displayMfr, controlURL: controlURL)
+                persistSubnet(of: host)
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.knownUUIDs.insert(id)
