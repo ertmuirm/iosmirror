@@ -153,7 +153,7 @@ final class MirrorBridge: RCTEventEmitter {
         }
         let session = DLNASession(controlURL: device.controlURL)
         dlnaSession = session
-        emit("onDebug", body: "dlna_connecting:\(url)")
+        emit("onDebug", body: "dlna_connecting:\(url):ctrl=\(device.controlURL)")
         session.loadAndPlay(url) { [weak self] err in
             DispatchQueue.main.async {
                 guard let self else { return }

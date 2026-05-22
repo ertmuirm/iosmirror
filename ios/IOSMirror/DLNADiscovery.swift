@@ -51,9 +51,13 @@ final class DLNADiscovery {
         (7676,  "/MediaRenderer.xml"),
         (7676,  "/upnp/0/getDescription"),
         (7676,  "/"),
+        (7678,  "/dmr/SamsungMRDesc.xml"),  // AU8000 / newer Samsung renderer port
+        (7678,  "/"),
         (52235, "/dmr/SamsungMRDesc.xml"),
         (52235, "/MediaRenderer.xml"),
         (52235, "/"),
+        (9119,  "/dmr/SamsungMRDesc.xml"),  // SmartHub legacy port
+        (9119,  "/"),
         (55001, "/MainTVServer2desc.xml"),
         (8080,  "/upnp/0/getDescription"),
         (8080,  "/samsungMobile/DeviceDesc.xml"),
@@ -385,22 +389,38 @@ final class DLNADiscovery {
         let result = DescriptionParser(xml: xml, baseURL: url, id: id).parseResult()
         let label  = "\(result.friendlyName.isEmpty ? "?" : result.friendlyName) [\(result.shortType)]"
         if let controlURL = result.controlURL {
-            onDebug?("dlna_added:\(label)")
+            // Prefer urn:schemas-upnp-org:device:MediaRenderer:1 descriptions — they
+            // use the correct port for SOAP.  A Samsung MainTVServer2 or similar
+            // proprietary description may also have AVTransport but its controlURL
+            // resolves to the wrong port (e.g. 9119 instead of 7676/7678).
+            let isMediaRenderer = result.deviceType.lowercased().contains("mediarenderer")
+            let host = url.host ?? "?"
+            let port = url.port ?? 0
+            onDebug?("dlna_added:\(label):\(host):\(port):renderer=\(isMediaRenderer)")
             let device = DLNADevice(id: id, name: result.friendlyName,
                                     manufacturer: result.manufacturer,
                                     controlURL: controlURL)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.knownUUIDs.insert(id)   // block further SSDP responses for this UUID
-                self.knownDevices[id] = device
-                self.onUpdate?(Array(self.knownDevices.values))
+                let alreadyHaveRenderer = self.knownUUIDs.contains(id)
+                if !alreadyHaveRenderer {
+                    self.knownDevices[id] = device
+                    self.onUpdate?(Array(self.knownDevices.values))
+                }
+                if isMediaRenderer {
+                    // Lock in this registration; subsequent SSDP responses for this
+                    // UUID are now blocked (we have the authoritative renderer URL).
+                    self.knownUUIDs.insert(id)
+                }
+                // Non-renderer: device registered temporarily but knownUUIDs not set,
+                // so a later MediaRenderer response can still override it.
             }
         } else if result.isSamsung, let host = url.host {
-            onDebug?("dlna_samsung_no_avt:\(label):probing_dmr")
+            onDebug?("dlna_samsung_no_avt:\(label):\(host):\(url.port ?? 0):probing_dmr")
             probeSamsungDMR(host: host, port: url.port ?? 7676, id: id,
                             name: result.friendlyName, mfr: result.manufacturer)
         } else {
-            onDebug?("dlna_rejected:\(label):no_avt")
+            onDebug?("dlna_rejected:\(label):\(url.host ?? "?"):\(url.port ?? 0)")
         }
     }
 

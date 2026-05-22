@@ -63,14 +63,16 @@ final class DLNASession {
         req.setValue("\"\(avtNS)#\(action)\"", forHTTPHeaderField: "SOAPAction")
         req.setValue("\(data.count)", forHTTPHeaderField: "Content-Length")
         req.httpBody = data
-        URLSession.shared.dataTask(with: req) { _, resp, err in
+        URLSession.shared.dataTask(with: req) { data, resp, err in
             if let err { completion(err); return }
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if (200..<300).contains(code) {
                 completion(nil)
             } else {
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                let desc = "HTTP \(code) \(action) → \(self.controlURL): \(body.prefix(300))"
                 completion(NSError(domain: "DLNASession", code: code,
-                                   userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"]))
+                                   userInfo: [NSLocalizedDescriptionKey: desc]))
             }
         }.resume()
     }
