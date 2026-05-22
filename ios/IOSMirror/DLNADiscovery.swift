@@ -44,6 +44,12 @@ final class DLNADiscovery {
     private let persistedSubnetKey = "dlna.persistedSubnets.v1"
     private var persistedSubnets: Set<String> = []
 
+    // Specific IP addresses of previously found DLNA devices.
+    // Persisted so we can directly HTTP-probe them even when the ARP cache
+    // has expired and the device doesn't respond to unicast SSDP.
+    private let persistedDeviceIPKey = "dlna.persistedDeviceIPs.v1"
+    private var persistedDeviceIPs: Set<String> = []
+
     private let searchTargets: [String] = [
         "upnp:rootdevice",
         "urn:schemas-upnp-org:device:MediaRenderer:1",
@@ -76,10 +82,12 @@ final class DLNADiscovery {
         guard !running else { return }
         running = true
 
-        // Load subnets where DLNA devices were found in previous sessions.
+        // Load subnets and device IPs where DLNA devices were found in previous sessions.
         let saved = UserDefaults.standard.stringArray(forKey: persistedSubnetKey) ?? []
         persistedSubnets = Set(saved)
-        if !saved.isEmpty { onDebug?("dlna_cached_subnets:\(saved.count)") }
+        let savedIPs = UserDefaults.standard.stringArray(forKey: persistedDeviceIPKey) ?? []
+        persistedDeviceIPs = Set(savedIPs)
+        if !saved.isEmpty { onDebug?("dlna_cached_subnets:\(saved.count):ips:\(savedIPs.count)") }
 
         // Path 1: passive SSDP socket + attempted M-SEARCH
         ssdpQueue.async { [weak self] in self?.runDiscovery() }
@@ -235,8 +243,13 @@ final class DLNADiscovery {
         // Phase 1: unicast SSDP to every IP in the subnet(s) — fast (UDP, no entitlement).
         unicastSSDPScan(hosts: allScanHosts)
 
-        // Phase 2: Samsung HTTP port probes on ARP hosts only (known alive; HTTP is expensive).
-        for ip in arpHosts {
+        // Phase 2: Samsung HTTP port probes on ARP hosts + persisted device IPs.
+        // Persisted IPs are probed even when their ARP entries have expired and
+        // the device didn't respond to unicast SSDP — ensuring reliable re-discovery
+        // of Samsung SmartHub TVs that don't reply to unicast M-SEARCH.
+        let hostsToProbe = Set(arpHosts).union(persistedDeviceIPs)
+        onDebug?("dlna_http_probe:\(hostsToProbe.count)_hosts(\(arpHosts.count)_arp+\(persistedDeviceIPs.count)_cached)")
+        for ip in hostsToProbe {
             guard running else { return }
             fetchQueue.async { [weak self] in
                 self?.probeSamsungDMR(host: ip, port: 7676, id: "arp-\(ip)", name: nil, mfr: nil)
@@ -261,6 +274,15 @@ final class DLNADiscovery {
         guard !prefix.isEmpty, !persistedSubnets.contains(prefix) else { return }
         persistedSubnets.insert(prefix)
         UserDefaults.standard.set(Array(persistedSubnets), forKey: persistedSubnetKey)
+    }
+
+    /// Saves the specific IP of a known DLNA device so it is always HTTP-probed
+    /// on future sweeps, even when absent from the ARP cache.
+    private func persistDeviceIP(_ ip: String) {
+        guard !ip.isEmpty, !persistedDeviceIPs.contains(ip) else { return }
+        persistedDeviceIPs.insert(ip)
+        UserDefaults.standard.set(Array(persistedDeviceIPs), forKey: persistedDeviceIPKey)
+        persistSubnet(of: ip)
     }
 
     /// Sends unicast UDP M-SEARCH to port 1900 on every ARP host, then waits
@@ -421,7 +443,7 @@ final class DLNADiscovery {
             let device = DLNADevice(id: id, name: result.friendlyName,
                                     manufacturer: result.manufacturer,
                                     controlURL: controlURL)
-            if let ip = url.host { persistSubnet(of: ip) }
+            if let ip = url.host { persistDeviceIP(ip) }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 // Always register — a later MediaRenderer response will overwrite a
@@ -471,11 +493,20 @@ final class DLNADiscovery {
                 onDebug?("dlna_samsung_added:\(displayName):\(host):\(probePort)\(probePath)")
                 let device = DLNADevice(id: id, name: displayName,
                                        manufacturer: displayMfr, controlURL: controlURL)
-                persistSubnet(of: host)
+                persistDeviceIP(host)
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    self.knownUUIDs.insert(id)
-                    self.knownDevices[id] = device
+                    // If a device at this host is already registered (e.g. via SSDP
+                    // using its UUID), update that entry rather than creating a duplicate.
+                    let existingID = self.knownDevices.first {
+                        $0.value.controlURL.host == host
+                    }?.key
+                    let targetID = existingID ?? id
+                    self.knownUUIDs.insert(targetID)
+                    self.knownDevices[targetID] = DLNADevice(
+                        id: targetID, name: device.name,
+                        manufacturer: device.manufacturer,
+                        controlURL: device.controlURL)
                     self.onUpdate?(Array(self.knownDevices.values))
                 }
                 return
